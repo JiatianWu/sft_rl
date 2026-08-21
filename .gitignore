@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.DS_Store
+
+# Training artifacts. `results/` is intentionally NOT ignored: per PLAN.md the
+# raw per-task JSON is part of the deliverable.
+outputs/
+checkpoints/
+adapters/
+wandb/
+
+# Downloaded corpus and its converted form (~214MB), both regenerable by
+# src/tooluse/data/prepare_sft.py. Anchored to the repo root so it does not also
+# swallow the src/tooluse/data package.
+/data/

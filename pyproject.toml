@@ -1,0 +1,81 @@
+[project]
+name = "tooluse"
+version = "0.1.0"
+description = "SFT -> GRPO -> eval loop for a sub-4B tool-use agent"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+
+# Core: everything needed to author code, build datasets, and submit Modal jobs
+# from a laptop. Deliberately torch-free so the local venv stays small and fast.
+dependencies = [
+    "modal>=1.5.0,<2",
+    # Floor is set by vllm 0.26.0 (transformers>=5.5.3), which is stricter than
+    # the >=5.2.0 that GRPOTrainer's environment_factory needs.
+    "transformers>=5.5.3,<6",
+    "datasets>=4.7.0",
+    "huggingface-hub>=1.0",
+    "jinja2>=3.1",
+]
+
+# The GPU stack is Linux-only and never installed locally: every requirement is
+# marked so that `uv lock` produces a macOS solution containing only the core
+# deps, and a Linux solution containing the full training stack.
+[project.optional-dependencies]
+train = [
+    # vllm 0.26.0 pins torch exactly; stating it here makes the coupling visible
+    # rather than an accident of resolution order.
+    "torch==2.11.0; sys_platform == 'linux'",
+    # environment_factory / get_reward / max_tool_calling_iterations land in the
+    # stable trl.trainer.grpo_trainer at 1.9.0.
+    "trl[peft,vllm]>=1.9.0,<2; sys_platform == 'linux'",
+    # trl/import_utils.py raises unless 0.17.0 <= vllm <= 0.26.0.
+    "vllm==0.26.0; sys_platform == 'linux'",
+    "peft>=0.20.0; sys_platform == 'linux'",
+    "accelerate>=1.4.0; sys_platform == 'linux'",
+]
+# BFCL cannot share an environment with the trainer: bfcl-eval pins numpy==1.26.4,
+# while vllm 0.26.0 pulls opencv-python-headless>=4.13.0 which needs numpy>=2. Its
+# own `oss-eval-vllm` extra pins vllm==0.8.5, below TRL's supported floor. So BFCL
+# gets a separate image and reaches the model over an OpenAI-compatible endpoint.
+eval = [
+    "bfcl-eval>=2026.3.23; sys_platform == 'linux'",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0",
+    "ruff>=0.16",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tooluse"]
+
+[tool.uv]
+# Resolve for exactly these two platforms: the laptop that submits jobs and the
+# Modal container that runs them. Keeps the lock small and the GPU markers honest.
+environments = [
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+
+# Resolved in separate forks rather than together, because they are provably
+# unsatisfiable as a pair (see the note on the `eval` extra above). Each Modal
+# image installs exactly one of them.
+conflicts = [[{ extra = "train" }, { extra = "eval" }]]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+# Ruff's default (E4/E7/E9/F) plus bug-oriented rules. E501 is deliberately out:
+# line length is a formatter concern and flagging it here only creates churn.
+select = ["E4", "E7", "E9", "F", "B", "UP", "SIM", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
