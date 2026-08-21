@@ -137,8 +137,28 @@ shares a database with any training task.
 
 ## 4. What the base model actually does
 
-Aggregate scores do not explain failures, so the harness stores full transcripts. The base
-checkpoint's dominant failure is not reasoning — it is protocol:
+An aggregate of 0.10 says the checkpoint is bad, not what to fix, so every episode is stored
+and classified into one mutually-exclusive bucket by the first thing that went wrong
+(`scripts/error_taxonomy.py`):
+
+| Failure mode | Base |
+|---|---|
+| stopped early — answered with oracle actions outstanding | 68.3% |
+| no tool call — answered from the prompt alone | 15.8% |
+| illegal write — a write the policy or order state forbids | 5.8% |
+| **solved** | **10.0%** |
+
+The striking entry is what is *absent*. Malformed calls and hallucinated tool names are
+**0%**, and no episode ever hit the turn limit: all 480 ended because the model chose to
+answer. The base model's problem is not that it cannot spell a tool call. It is that it
+does not take enough turns.
+
+The distribution of tool calls per episode makes this concrete — 76 episodes made none, 288
+made exactly one, 112 made two, and 4 made three. The behaviour is: perform one lookup, then
+immediately answer the user, whether or not the task required a write.
+
+One qualitative failure is worth recording because the taxonomy hides it inside "no tool
+call". The model sometimes produces a correct call in the wrong wrapper:
 
 ```
 [user]      Hi, I need to cancel an order. My email is yusuf.muller93@example.com ...
@@ -146,14 +166,17 @@ checkpoint's dominant failure is not reasoning — it is protocol:
                       "arguments": {"email": "yusuf.muller93@example.com"}} </search>
 ```
 
-The tool is right and the JSON is well-formed, but it is wrapped in `<search>` rather than
-`<tool_call>`, so nothing executes and the episode ends. Across 480 base episodes, 76 made
-no tool call at all, 288 made exactly one, and only 4 reached three. The base model does not
-chain: it calls one tool, then answers without using the result.
+The tool and the JSON are both right; only `<search>` instead of `<tool_call>` is wrong, so
+nothing executes.
 
-This is why the protocol term carries real weight early in RL, and why SFT — which shows the
-model thousands of correctly-wrapped multi-turn trajectories — is the stage expected to move
-this particular number.
+**The consequence for RL is the important part.** Among the 368 early-stopping failures,
+`r_progress` is `0.0` in *every single one* — not one correct oracle action with correct
+arguments. Outcomes are therefore near-bimodal: an episode either does the whole task or
+achieves literally nothing. That is precisely the regime where GRPO's group-relative
+advantage collapses, because all G rollouts in a group score identically and cancel. It
+predicts the `frac_reward_zero_std ≈ 0.5` observed during RL, and it is the concrete reason
+SFT is load-bearing rather than decorative: its job is to manufacture the partial successes
+that give RL something to differentiate.
 
 ---
 
@@ -216,6 +239,12 @@ These cost time, and each was found by running the producer rather than trusting
   gains transfer off-distribution.
 - **Single seed, one run per stage.** No error bars. At this scale the differences between
   checkpoints should be read as directional, not precise.
+- **The compute budget bound the results, not the code.** The $30 credit was exhausted
+  partway through the SFT run (§5). Every stage had already been validated end to end on
+  Modal beforehand — the GRPO smoke test confirms `environment_factory` trains with
+  colocate vLLM and a LoRA adapter — so what is missing is GPU minutes, not working
+  pipeline. Any number below that is absent rather than estimated is marked as such; none
+  are projected.
 - **The RL run is small.** A few hundred tasks and a few thousand rollouts is a smoke-test
   scale for GRPO, chosen to fit the budget on a slower GPU than planned.
 - **A residual train/inference mismatch remains.** During a rollout the empty `<think>`
@@ -239,11 +268,18 @@ Ordered by expected value, not by effort.
    construction and a unit test, not by measurement. I would drop each in turn and check
    both final success and whether shaping induces hacking.
 4. **Separate SFT-only, RL-only and SFT→RL**, at 0.6B and 1.7B, with 3 seeds. This answers
-   "what did RL add over more imitation?", which the current single path cannot.
+   "what did RL add over more imitation?", which the current single path cannot. The RL-only
+   arm is already implemented — `--adapter none` trains a fresh LoRA built from the same
+   `tooluse.train.lora` config SFT uses, so the two differ in initialisation and nothing
+   else — and was launched, but died with the compute budget (§6). It is a run away, not a
+   build away.
 5. **Scale the base model.** 0.6B is at the edge of being able to follow a tool protocol at
    all; a good deal of the measured variance is protocol noise rather than decision quality.
 6. **Train for pass^k rather than pass^1.** Consistency is what makes a small agent
    deployable, and pass^k is already computed.
-7. **Grow the environment** toward multiple domains using TRL's environment routing, and
-   build an error taxonomy (wrong tool / right tool wrong args / premature stop / policy
-   violation) so that a failing aggregate points at something actionable.
+7. **Act on the error taxonomy.** It already exists (§4) and already points somewhere
+   specific: premature termination, not malformed syntax, is the failure to attack. A turn
+   penalty is the wrong tool for that; the right one is training on the decision to continue
+   — which is what the per-action progress term is for, and what a longer RL run would test.
+8. **Grow the environment** toward multiple domains using TRL's environment routing, so the
+   taxonomy can be read per domain rather than pooled.
