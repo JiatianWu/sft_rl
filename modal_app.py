@@ -21,7 +21,9 @@ APP_NAME = "tooluse-sft-rl"
 
 # Overridable so the pipeline can fall back to whatever tier the account can reach
 # (H100 requires a payment method on file; A10/L4/T4 do not).
-GPU = os.environ.get("TOOLUSE_GPU", "H100")
+GPU = os.environ.get("TOOLUSE_GPU", "A10")
+
+CUDA_HOME = "/usr/local/lib/python3.12/site-packages/nvidia/cu13"
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
@@ -41,6 +43,15 @@ image = (
             "TRL_EXPERIMENTAL_SILENCE": "1",
             "TOKENIZERS_PARALLELISM": "false",
             "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
+            # vLLM JIT-compiles kernels at startup and needs nvcc. The slim image has no
+            # system CUDA toolkit, but the pip `nvidia-cuda-nvcc` wheel ships one here.
+            "CUDA_HOME": CUDA_HOME,
+            "PATH": f"{CUDA_HOME}/bin:/usr/local/bin:/usr/bin:/bin",
+            # A10 is sm_86, for which FlashInfer ships no prebuilt kernels, so vLLM tries
+            # to JIT-compile them on every cold start. Using the native sampler skips a
+            # compile that needs a full host toolchain and burns GPU minutes each launch.
+            "VLLM_USE_FLASHINFER_SAMPLER": "0",
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
         }
     )
     .add_local_python_source("tooluse")
@@ -64,6 +75,18 @@ def prepare() -> None:
 
     build(limit=None, out_path=Path("/work/data/sft_apigen.jsonl"), cache=Path("/cache/apigen-mt_5k.json"))
     workspace.commit()
+
+
+@app.function(timeout=10 * 60)
+def find_nvcc() -> None:
+    """Locate the pip-installed CUDA toolkit so CUDA_HOME can point at it."""
+    import subprocess
+
+    print(subprocess.run(["find", "/usr/local/lib/python3.12/site-packages/nvidia", "-name", "nvcc"],
+                         capture_output=True, text=True).stdout)
+    print(subprocess.run(["find", "/usr/local/lib/python3.12/site-packages/nvidia", "-maxdepth", "2",
+                          "-name", "include", "-o", "-maxdepth", "2", "-name", "bin"],
+                         capture_output=True, text=True).stdout)
 
 
 @app.function(gpu=GPU, timeout=10 * 60)

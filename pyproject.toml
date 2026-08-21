@@ -21,17 +21,21 @@ dependencies = [
 # marked so that `uv lock` produces a macOS solution containing only the core
 # deps, and a Linux solution containing the full training stack.
 [project.optional-dependencies]
+# These pins mirror the Modal image in `modal_app.py`, which is the set actually
+# validated end to end (smoke test, SFT, GRPO and eval all ran on it).
 train = [
-    # vllm 0.26.0 pins torch exactly; stating it here makes the coupling visible
-    # rather than an accident of resolution order.
-    "torch==2.11.0; sys_platform == 'linux'",
+    "torch==2.13.0; sys_platform == 'linux'",
     # environment_factory / get_reward / max_tool_calling_iterations land in the
     # stable trl.trainer.grpo_trainer at 1.9.0.
-    "trl[peft,vllm]>=1.9.0,<2; sys_platform == 'linux'",
-    # trl/import_utils.py raises unless 0.17.0 <= vllm <= 0.26.0.
-    "vllm==0.26.0; sys_platform == 'linux'",
-    "peft>=0.20.0; sys_platform == 'linux'",
-    "accelerate>=1.4.0; sys_platform == 'linux'",
+    "trl==1.10.0; sys_platform == 'linux'",
+    # TRL's docs and its import check name 0.17.0-0.26.0 as the supported range,
+    # but on 1.10.0 an out-of-range vllm only emits a UserWarning. Verified on an
+    # A10: vllm 0.27.1 generates, and GRPO trains with vllm_mode="colocate" plus a
+    # LoRA adapter. Pinned to what was tested rather than to what the docs claim.
+    "vllm==0.27.1; sys_platform == 'linux'",
+    "transformers==5.15.1; sys_platform == 'linux'",
+    "peft==0.20.0; sys_platform == 'linux'",
+    "accelerate==1.14.0; sys_platform == 'linux'",
 ]
 # BFCL cannot share an environment with the trainer: bfcl-eval pins numpy==1.26.4,
 # while vllm 0.26.0 pulls opencv-python-headless>=4.13.0 which needs numpy>=2. Its

@@ -72,8 +72,8 @@ def main() -> None:
     parser.add_argument("--max-length", type=int, default=8192)
     parser.add_argument("--epochs", type=float, default=1.0)
     parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--batch-size", type=int, default=2)
-    parser.add_argument("--grad-accum", type=int, default=8)
+    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--grad-accum", type=int, default=16)
     parser.add_argument("--lora-rank", type=int, default=32)
     args = parser.parse_args()
 
@@ -105,7 +105,7 @@ def main() -> None:
             gradient_accumulation_steps=args.grad_accum,
             learning_rate=args.lr,
             lr_scheduler_type="cosine",
-            warmup_ratio=0.03,
+            warmup_steps=5,  # transformers 5 removed warmup_ratio
             logging_steps=5,
             save_strategy="no",
             bf16=True,

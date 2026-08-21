@@ -37,9 +37,13 @@ class RetailEnv:
     """A seeded retail back office exposed as tools."""
 
     def __init__(self) -> None:
-        self._spec: TaskSpec | None = None
-        self._db: dict[str, Any] = {}
-        self._rollout = Rollout()
+        # Start in a valid state. TRL probes a freshly constructed instance with
+        # `inspect.getmembers`, which evaluates every attribute including properties, so
+        # an environment that is unusable before `reset()` raises during trainer setup.
+        self._spec: TaskSpec
+        self._db: dict[str, Any]
+        self._rollout: Rollout
+        self.reset()
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -54,8 +58,6 @@ class RetailEnv:
 
     @property
     def spec(self) -> TaskSpec:
-        if self._spec is None:
-            raise RuntimeError("reset() must be called before using the environment")
         return self._spec
 
     def _record(self, name: str, args: dict[str, Any], ok: bool, illegal_write: bool = False) -> None:

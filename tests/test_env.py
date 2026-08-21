@@ -127,6 +127,34 @@ def test_reset_fully_reinitialises_pooled_instance() -> None:
     assert db_hash(env._db) != dirty_hash
 
 
+def test_fresh_instance_survives_trl_probe() -> None:
+    """Regression: TRL inspects a freshly built environment before ever calling reset.
+
+    `inspect.getmembers` evaluates properties, so an environment that raised before
+    `reset()` blew up during trainer construction rather than at rollout time.
+    """
+    import inspect
+
+    env = RetailEnv()
+    methods = inspect.getmembers(env, predicate=inspect.ismethod)
+    exposed = [name for name, _ in methods if not name.startswith("_") and name != "reset"]
+    assert sorted(exposed) == sorted(
+        [
+            "cancel_pending_order",
+            "exchange_delivered_order_items",
+            "find_user_id_by_email",
+            "get_order_details",
+            "get_product_details",
+            "get_user_details",
+            "list_user_orders",
+            "modify_pending_order_address",
+            "return_delivered_order_items",
+            "transfer_to_human",
+        ]
+    )
+    assert env.spec is not None
+
+
 def test_tool_schemas_render() -> None:
     """Every tool must produce a valid JSON schema, or the model never sees it."""
     from transformers.utils import get_json_schema

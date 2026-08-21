@@ -1,43 +1,72 @@
-# tooluse
+# Multi-turn tool use: SFT → GRPO → eval on a 0.6B model
 
-SFT → GRPO → eval loop for a sub-4B tool-use agent. See [PLAN.md](PLAN.md) for the design,
-trade-offs, and kill-gates.
+A minimal but complete pipeline that takes `Qwen3-0.6B` from base weights, through LoRA
+instruction tuning on multi-turn tool-use trajectories, through online RL (GRPO) against
+an environment with verifiable rewards, and evaluates all three checkpoints identically.
 
-## Local setup
+- **[PLAN.md](PLAN.md)** — the plan, written before any code.
+- **[WRITEUP.md](WRITEUP.md)** — results, reward design, trade-offs, and what failed.
 
-The laptop only authors code and submits Modal jobs, so the local environment is
-deliberately torch-free.
+## The loop
+
+| Stage | What it does | Entry point |
+|---|---|---|
+| Data | APIGen-MT-5k → chat trajectories with tool calls | `tooluse.data.prepare_sft` |
+| SFT | LoRA, assistant-only loss | `tooluse.train.sft` |
+| RL | GRPO against `tau-retail-lite` | `tooluse.train.grpo` |
+| Eval | held-out tasks, pass^k, decomposed metrics | `tooluse.eval.run_eval` |
+
+## Quick start
 
 ```bash
-uv sync                  # core + dev, macOS-safe
-source .venv/bin/activate
-modal setup              # one-time browser auth, writes ~/.modal.toml
+pip install -e .
+pytest                                  # environment, reward and template invariants
+
+modal run modal_app.py::prepare         # build the SFT dataset into the volume
+modal run modal_app.py::smoke           # verify the stack before spending GPU time
+modal run modal_app.py::evaluate --tag base
+modal run modal_app.py::sft
+modal run modal_app.py::evaluate --tag sft --adapter /work/checkpoints/sft
+modal run modal_app.py::grpo
+modal run modal_app.py::evaluate --tag grpo --adapter /work/checkpoints/grpo
 ```
 
-Use this venv, not another project's. The `train` and `eval` extras are marked
-`sys_platform == 'linux'` and will not install locally by design.
+`TOOLUSE_GPU` selects the accelerator (defaults to `A10`, the largest tier reachable on a
+Modal account without a payment method on file).
 
-## Why the versions are what they are
+## The environment: `tau-retail-lite`
 
-Every pin traces to a constraint in a producer's own metadata or source, not to a doc:
+A stateful retail back office in the spirit of τ-bench's retail domain: a seeded database
+of users, orders and products, ten tools, and six task families (`cancel_order`,
+`modify_address`, `return_items`, `exchange_items`, `lookup_and_report`,
+`refuse_invalid`). Tasks are generated procedurally, so train and test share no database.
 
-| Pin | Forced by |
-|---|---|
-| `vllm==0.26.0` | `trl/import_utils.py` raises unless `0.17.0 <= vllm <= 0.26.0`. 0.27.x fails this check. |
-| `torch==2.11.0` | vllm 0.26.0's `requires_dist` pins `torch==2.11.0` exactly. |
-| `transformers>=5.5.3` | vllm 0.26.0 requires it; stricter than the `>=5.2.0` that `environment_factory` needs. |
-| `trl>=1.9.0` | `environment_factory`, `get_reward`, `max_tool_calling_iterations` appear in the stable `trl/trainer/grpo_trainer.py` at 1.9.0. |
-| Python 3.12 | `trl[harbor]` needs `>=3.12`; modal and vllm both cap at `<3.15`. |
+Rewards are grounded, never model-judged. Following τ-bench, the outcome term is a
+**product**:
 
-Unsloth is **not** in this project. Its current release requires `trl<=0.24.0`,
-`transformers<=5.5.0`, and `datasets<4.4.0`, which is mutually exclusive with both
-`environment_factory` (needs trl >= 1.9.0) and vllm (needs transformers >= 5.5.3). SFT
-therefore uses TRL's `SFTTrainer` + PEFT — PLAN.md's pre-committed T1 fallback — which
-keeps SFT, GRPO, and eval on one image and one lockfile.
+```
+r_outcome = r_action * r_output
+  r_action = final database state hash == ground truth
+  r_output = every required fact appears in what the agent told the user
+```
 
-## Drift guarantee
+The ground-truth state is *derived* by executing the task's oracle action list, so the
+oracle and the reward cannot drift apart. `tests/test_env.py` asserts the oracle scores
+1.0 on every family; if it ever does not, the task is unsolvable and any RL number on it
+would be meaningless.
 
-`infra/app.py` builds its images with `Image.uv_sync()` against this same
-`pyproject.toml` + `uv.lock`, so the container cannot silently diverge from the
-resolution recorded here. Bump a version by editing `pyproject.toml` and re-running
-`uv lock`; never by editing an image definition.
+See [WRITEUP.md](WRITEUP.md) for the shaping terms, how sparse signal is handled, and the
+reward-hacking hole the tests caught.
+
+## Layout
+
+```
+src/tooluse/
+  env/      db.py  tasks.py  retail.py  reward.py  splits.py
+  data/     prepare_sft.py  masking.py
+  train/    sft.py  grpo.py  rewards.py
+  eval/     harness.py  run_eval.py
+tests/      env, harness and chat-template invariants
+modal_app.py
+results/    raw per-episode JSON for every checkpoint
+```

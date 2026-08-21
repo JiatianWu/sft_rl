@@ -21,11 +21,25 @@ from typing import Any
 SENTINEL = "__END_OF_TRAJECTORY_SENTINEL__"
 IGNORE_INDEX = -100
 
-# `enable_thinking=True` is the setting that produces a *bare* `<|im_start|>assistant\n`
-# generation prompt. The opposite setting injects an empty think block that the training
-# data would not contain. This constant is imported by training and eval so that the
-# three stages cannot drift apart.
-CHAT_TEMPLATE_KWARGS = {"enable_thinking": True}
+# Inference-time template settings, imported by RL and eval so the stages cannot drift.
+#
+# `enable_thinking=False` makes the generation prompt end with an empty
+# `<think>\n\n</think>\n\n` block, which suppresses chain-of-thought. This is not a
+# stylistic choice: with thinking enabled, Qwen3-0.6B spends its entire completion budget
+# reasoning and never emits a tool call, which would handicap the *base* checkpoint
+# specifically and inflate the apparent gain from SFT.
+#
+# Note the one residual train/inference difference this leaves. During a rollout the
+# think block is ephemeral: it prefixes the turn being generated, but once the tool result
+# is appended and the conversation is re-rendered, past assistant turns appear without it.
+# A single contiguous SFT sequence cannot reproduce that (it would have think blocks on
+# every assistant turn or none). Training without them keeps the mismatch to a constant
+# 5-token prefix on the current turn instead of spreading it across the whole history.
+CHAT_TEMPLATE_KWARGS = {"enable_thinking": False}
+
+# What `add_generation_prompt=True` appends beyond a training prefix, under the settings
+# above. Asserted in the tests so a template change cannot silently widen the gap.
+GENERATION_PREFIX = "<|im_start|>assistant\n<think>\n\n</think>\n\n"
 
 
 def render_prefix(tokenizer, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> str:
@@ -97,4 +111,11 @@ def generation_prompt(tokenizer, messages: list[dict[str, Any]], tools: list[dic
     )
 
 
-__all__ = ["CHAT_TEMPLATE_KWARGS", "IGNORE_INDEX", "build_example", "generation_prompt", "render_prefix"]
+__all__ = [
+    "CHAT_TEMPLATE_KWARGS",
+    "GENERATION_PREFIX",
+    "IGNORE_INDEX",
+    "build_example",
+    "generation_prompt",
+    "render_prefix",
+]

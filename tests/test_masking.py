@@ -8,7 +8,13 @@ from __future__ import annotations
 
 import pytest
 
-from tooluse.data.masking import IGNORE_INDEX, build_example, generation_prompt, render_prefix
+from tooluse.data.masking import (
+    GENERATION_PREFIX,
+    IGNORE_INDEX,
+    build_example,
+    generation_prompt,
+    render_prefix,
+)
 
 MODEL = "Qwen/Qwen3-0.6B"
 
@@ -46,21 +52,24 @@ def tokenizer():
     return transformers.AutoTokenizer.from_pretrained(MODEL)
 
 
-def test_training_prefix_equals_inference_prompt(tokenizer) -> None:
-    """The single most important invariant in the SFT pipeline."""
+def test_inference_prompt_differs_from_training_only_by_the_think_prefix(tokenizer) -> None:
+    """Pin down the exact train/inference gap.
+
+    The gap is deliberate and documented in `masking`: thinking is suppressed at
+    inference so the base checkpoint is not handicapped. What must not happen is the gap
+    silently *growing* if the chat template changes, so it is asserted exactly.
+    """
     for index, message in enumerate(MESSAGES):
         if message["role"] != "assistant":
             continue
-        training_prefix = render_prefix(tokenizer, MESSAGES[:index], TOOLS) + "<|im_start|>assistant\n"
+        training_prefix = render_prefix(tokenizer, MESSAGES[:index], TOOLS)
         inference_prompt = generation_prompt(tokenizer, MESSAGES[:index], TOOLS)
-        assert training_prefix == inference_prompt, f"turn {index} diverges"
+        assert inference_prompt == training_prefix + GENERATION_PREFIX, f"turn {index} diverges"
 
 
-def test_no_think_block_is_injected(tokenizer) -> None:
-    """The empty <think> block appears at inference only under enable_thinking=False."""
-    rendered = render_prefix(tokenizer, MESSAGES, TOOLS)
-    assert "<think>" not in rendered
-    assert "<think>" not in generation_prompt(tokenizer, MESSAGES[:2], TOOLS)
+def test_history_never_contains_think_blocks(tokenizer) -> None:
+    """Past assistant turns must render identically in training and during a rollout."""
+    assert "<think>" not in render_prefix(tokenizer, MESSAGES, TOOLS)
 
 
 def test_rendering_is_append_only(tokenizer) -> None:
