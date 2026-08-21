@@ -10,7 +10,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-TAGS = [("base", "Base"), ("sft", "+ SFT"), ("grpo", "+ SFT + GRPO")]
+# `rl_only` is the ablation: an identically-configured LoRA trained with GRPO straight from
+# the base model, so the SFT column and the RL-only column differ in one thing only.
+TAGS = [
+    ("base", "Base"),
+    ("sft", "+ SFT"),
+    ("rl_only", "GRPO only"),
+    ("grpo", "+ SFT + GRPO"),
+]
 
 HEADLINE = [
     ("pass^1", "pass^1", "{:.3f}"),

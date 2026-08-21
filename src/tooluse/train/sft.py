@@ -17,10 +17,11 @@ from typing import Any
 
 import torch
 from datasets import Dataset
-from peft import LoraConfig, get_peft_model
+from peft import get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 
 from tooluse.data.masking import IGNORE_INDEX, build_example
+from tooluse.train.lora import build_lora
 
 
 @dataclass
@@ -85,15 +86,7 @@ def main() -> None:
     model.gradient_checkpointing_enable()
     model.enable_input_require_grads()
 
-    lora = LoraConfig(
-        r=args.lora_rank,
-        lora_alpha=args.lora_rank * 2,
-        lora_dropout=0.0,
-        bias="none",
-        task_type="CAUSAL_LM",
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-    )
-    model = get_peft_model(model, lora)
+    model = get_peft_model(model, build_lora(args.lora_rank))
     model.print_trainable_parameters()
 
     trainer = Trainer(

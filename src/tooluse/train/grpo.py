@@ -61,7 +61,16 @@ def main() -> None:
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     model = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch.bfloat16)
 
-    if args.adapter is not None:
+    if args.adapter is None:
+        # RL-only ablation: same adapter capacity, no SFT initialisation. This is what
+        # isolates SFT's contribution from RL's.
+        from peft import get_peft_model
+
+        from tooluse.train.lora import build_lora
+
+        model = get_peft_model(model, build_lora())
+        print("[grpo] fresh LoRA (no SFT initialisation)")
+    else:
         from peft import PeftModel
 
         # Continue training the SFT adapter rather than starting a fresh one, so RL

@@ -173,7 +173,13 @@ def sft(limit: int = 2500, epochs: float = 1.0, max_length: int = 8192) -> None:
 
 
 @app.function(gpu=GPU, volumes=VOLUMES, timeout=4 * HOURS)
-def grpo(steps: int = 120, adapter: str = "/work/checkpoints/sft", protocol_weight: float = 0.3) -> None:
+def grpo(
+    steps: int = 60,
+    adapter: str = "/work/checkpoints/sft",
+    protocol_weight: float = 0.3,
+    output: str = "/work/checkpoints/grpo",
+    grad_accum: int = 2,
+) -> None:
     import subprocess
 
     command = [
@@ -181,7 +187,9 @@ def grpo(steps: int = 120, adapter: str = "/work/checkpoints/sft", protocol_weig
         "-m",
         "tooluse.train.grpo",
         "--output",
-        "/work/checkpoints/grpo",
+        output,
+        "--grad-accum",
+        str(grad_accum),
         "--steps",
         str(steps),
         "--protocol-weight",
@@ -216,6 +224,64 @@ def evaluate(tag: str, adapter: str | None = None, n_seeds: int = 20, trials: in
     workspace.commit()
 
 
+@app.function(gpu=GPU, volumes=VOLUMES, timeout=4 * HOURS)
+def finish(sft_limit: int = 1000, grpo_steps: int = 30, n_seeds: int = 120, trials: int = 4) -> None:
+    """SFT -> eval -> GRPO -> eval inside a single container.
+
+    Running these as four separate Modal functions costs four cold starts, and each one
+    re-downloads the base weights: roughly fifteen minutes of paid GPU time spent on
+    nothing. Sharing one container also shares the HF cache.
+
+    The volume is committed after every stage. An earlier run was preempted mid-SFT and
+    lost the lot, because the adapter is only written at the end; committing per stage means
+    an interruption costs one stage rather than all of them.
+    """
+    import subprocess
+
+    def stage(name: str, command: list[str]) -> None:
+        print(f"\n{'=' * 70}\n[finish] {name}\n{'=' * 70}", flush=True)
+        subprocess.run(command, check=True)
+        workspace.commit()
+        print(f"[finish] {name} committed", flush=True)
+
+    stage(
+        "1/4 SFT",
+        [
+            "python", "-m", "tooluse.train.sft",
+            "--data", "/work/data/sft_apigen.jsonl",
+            "--output", "/work/checkpoints/sft",
+            "--limit", str(sft_limit),
+            "--max-length", "8192",
+        ],
+    )
+    stage(
+        "2/4 eval post-SFT",
+        [
+            "python", "-m", "tooluse.eval.run_eval",
+            "--tag", "sft", "--adapter", "/work/checkpoints/sft",
+            "--n-seeds", str(n_seeds), "--trials", str(trials), "--out", "/work/results",
+        ],
+    )
+    stage(
+        "3/4 GRPO",
+        [
+            "python", "-m", "tooluse.train.grpo",
+            "--adapter", "/work/checkpoints/sft",
+            "--output", "/work/checkpoints/grpo",
+            "--steps", str(grpo_steps),
+        ],
+    )
+    stage(
+        "4/4 eval post-RL",
+        [
+            "python", "-m", "tooluse.eval.run_eval",
+            "--tag", "grpo", "--adapter", "/work/checkpoints/grpo",
+            "--n-seeds", str(n_seeds), "--trials", str(trials), "--out", "/work/results",
+        ],
+    )
+    print("\n[finish] all four stages complete", flush=True)
+
+
 @app.function(volumes=VOLUMES, timeout=1 * HOURS)
 def fetch(path: str) -> bytes:
     """Read a file back out of the workspace volume."""
@@ -226,11 +292,20 @@ def fetch(path: str) -> bytes:
 
 @app.local_entrypoint()
 def main() -> None:
-    """The whole loop, in order."""
+    """The whole loop from an empty workspace, in order."""
     prepare.remote()
     smoke.remote()
-    evaluate.remote(tag="base")
-    sft.remote()
-    evaluate.remote(tag="sft", adapter="/work/checkpoints/sft")
-    grpo.remote()
-    evaluate.remote(tag="grpo", adapter="/work/checkpoints/grpo")
+    evaluate.remote(tag="base", n_seeds=120)
+    finish.remote()
+
+
+@app.local_entrypoint()
+def resume() -> None:
+    """Everything except the base eval, for a fresh workspace when base results already exist.
+
+    The base numbers are produced by code that has not changed and by the same held-out
+    seeds and decoding settings, so re-measuring them would only spend GPU minutes to
+    reproduce a number already in `results/`.
+    """
+    prepare.remote()
+    finish.remote()
