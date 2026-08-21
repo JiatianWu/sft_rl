@@ -22,27 +22,23 @@ in verifiable state rather than an LLM judge.
 
 ### Why these choices
 
-**`Qwen3-0.6B`.** Its chat template already emits `<tool_call>` blocks, so tool syntax is a
-prior the base model has some grip on and SFT can spend its capacity on *when* to call
-rather than *how to spell it*. It is also small enough that a GRPO step with 8 rollouts is
-seconds, not minutes, which is what makes an RL run fit in the budget at all.
+**`Qwen3-0.6B`.** Its chat template already emits `<tool_call>` blocks, so SFT can spend
+capacity on *when* to call rather than how to spell it. It is also small enough that a GRPO
+step with 8 rollouts takes seconds, which is what makes an RL run fit the budget at all.
 
-**GRPO over PPO.** GRPO is critic-free. Fitting a value head on a 0.6B model with a few
-hundred episodes would be the least reliable part of the system, and skipping it is the
-single biggest saving available. The group-relative baseline also matches a binary task
-reward well.
+**GRPO over PPO.** GRPO is critic-free. Fitting a value head on a 0.6B model from a few
+hundred episodes would be the least reliable part of the system, and its group-relative
+baseline suits a binary task reward.
 
 **A self-built environment over τ-bench itself.** τ-bench's reward design is the right one
-and is copied directly (below), but running the benchmark requires an LLM user simulator:
-API cost, nondeterminism, and latency inside the RL loop. A procedural environment gives
-thousands of tasks, a train/test split with no shared database, and a free, deterministic
-reward. The cost is real and stated plainly in §6: the headline number is measured on a
-benchmark I wrote.
+and is copied directly (below), but the benchmark needs an LLM user simulator: API cost,
+nondeterminism and latency inside the RL loop. A procedural environment gives thousands of
+tasks, a train/test split sharing no database, and a free deterministic reward. The cost is
+stated plainly in §6 — the headline number is measured on a benchmark I wrote.
 
-**Stock PEFT instead of Unsloth.** Unsloth was the suggested stack and would have made SFT
-roughly twice as fast. It pins its own `transformers`, while TRL's `environment_factory`
-requires `transformers>=5.2`. One dependency set removed a version conflict and an image
-build from a hard time budget; the ~10 minutes saved did not justify the risk.
+**Stock PEFT instead of Unsloth.** Unsloth would have roughly halved SFT time, but it pins
+its own `transformers` while TRL's `environment_factory` needs `transformers>=5.2`. The ~10
+minutes saved did not justify a version conflict inside a hard time budget.
 
 ---
 
@@ -180,51 +176,24 @@ that give RL something to differentiate.
 
 ---
 
-## 5. Engineering findings worth recording
+## 5. Engineering findings
 
-These cost time, and each was found by running the producer rather than trusting a doc.
+Full list in [`ENGINEERING_NOTES.md`](ENGINEERING_NOTES.md); each was found by running the
+producing code rather than trusting a doc, and each is pinned by a test. The four that
+changed the design:
 
-- **TRL's `environment_factory` probes the environment before using it.** It calls
-  `inspect.getmembers` on a freshly constructed instance, which evaluates properties. An
-  environment that raised "call reset() first" therefore crashed during *trainer
-  construction*. Environments must be valid from `__init__`.
-- **Qwen3's chat template has no `{% generation %}` marker**, so TRL's `assistant_only_loss`
-  cannot be used with it. Masking is done manually. This matters more than it sounds:
-  training on tool-response tokens teaches the model to *generate* database contents, which
-  is precisely the hallucination the environment exists to punish.
-- **The template renders the last assistant message differently from earlier ones** (it
-  injects an empty `<think>` block). That makes `render(messages[:i])` *not* a prefix of
-  `render(messages[:j])`, so naive incremental diffing silently misaligns the loss mask.
-  Appending a sentinel user turn before rendering removes the special case.
-- **Thinking had to be suppressed for a fair baseline.** With thinking enabled, Qwen3-0.6B
-  spends its entire completion budget reasoning and never emits a tool call. Left on, it
-  would have handicapped the *base* checkpoint specifically and inflated the apparent gain
-  from SFT. `enable_thinking=False` is used for all three checkpoints.
-- **The tools block dominates the SFT sequence.** APIGen-MT's policy plus tool schemas is
-  ~3,750 tokens. At a 4k cap only 6% of trajectories fit whole and the assistant turns were
-  being truncated away; at 8k, 97% fit. Only ~11% of tokens carry loss.
-- **TRL's documented vLLM ceiling is stale.** It names 0.17.0–0.26.0 and warns on anything
-  newer, but 0.27.1 only produces a `UserWarning`, and GRPO trained fine with colocate vLLM
-  plus a LoRA adapter. Pins in `pyproject.toml` reflect what was tested, not what the docs
-  claim.
-- **Free-tier reality.** H100/A100/L40S all require a payment method, so everything ran on
-  an **A10**. That image also needed `CUDA_HOME` pointed at the pip CUDA toolkit and the
-  FlashInfer sampler disabled — A10 is sm_86, which has no prebuilt FlashInfer kernels, so
-  vLLM otherwise tries to JIT-compile them on every cold start without a host toolchain.
-  SFT runs at batch size 1 because Qwen3's 151k vocab makes the logits tensor dominate
-  memory at 8192 tokens.
-- **A spend limit surfaces as a scheduling message, not a billing error.** When the credit
-  ran out mid-SFT, the job was evicted at step 49/125 and the log said only that it was
-  *"waiting to be scheduled on a GPU_A10G worker … acquiring more capacity"*. That reads as
-  transient scarcity, so the correct response (stop waiting) looks exactly like the wrong
-  one. Only an unrelated command surfaced the actual cause, `exceeded its spend limit`.
-- **Checkpoint per stage, not per pipeline.** The eviction cost the whole SFT run because
-  the adapter is written once at the end. Worse, splitting the pipeline across four Modal
-  functions meant four cold starts, each re-downloading the base weights — roughly fifteen
-  minutes of paid GPU time spent on nothing. The stages now run in one container
-  (`modal_app.py::finish`) and commit the volume after each, so an interruption costs one
-  stage instead of the run. On a metered budget, this is the difference between losing
-  twenty minutes and losing everything.
+- **TRL's `environment_factory` evaluates every property on a freshly built environment**
+  before calling `reset`, so an environment that is invalid until reset crashes during
+  *trainer construction*, not at rollout time.
+- **Qwen3's template has no `{% generation %}` marker**, so `assistant_only_loss` is
+  unusable and masking is manual. Getting it wrong is silent: training on tool-response
+  tokens teaches the model to *generate* database contents, the exact hallucination the
+  environment punishes.
+- **Thinking had to be disabled for a fair baseline** — with it on, the 0.6B spends its
+  whole budget reasoning and never calls a tool, which would have handicapped the *base*
+  checkpoint specifically and inflated SFT's apparent gain.
+- **A Modal spend limit is reported as "waiting for capacity."** Transient scarcity and a
+  dead budget look identical in the logs, and the difference is fifteen minutes of waiting.
 
 ---
 
@@ -259,27 +228,24 @@ These cost time, and each was found by running the producer rather than trusting
 
 Ordered by expected value, not by effort.
 
-1. **Attack `frac_reward_zero_std` directly.** Half of all groups produced no gradient.
-   Filtering tasks whose G rollouts all agree, and sampling difficulty against a running
-   per-family success estimate, is the cheapest large win available.
-2. **Run BFCL multi-turn** on all three checkpoints, plus real τ³-bench with an LLM user
-   simulator, to find out whether any of this transfers.
-3. **Ablate the reward.** Every shaping term above is currently a *claim* backed by
-   construction and a unit test, not by measurement. I would drop each in turn and check
-   both final success and whether shaping induces hacking.
-4. **Separate SFT-only, RL-only and SFT→RL**, at 0.6B and 1.7B, with 3 seeds. This answers
-   "what did RL add over more imitation?", which the current single path cannot. The RL-only
-   arm is already implemented — `--adapter none` trains a fresh LoRA built from the same
-   `tooluse.train.lora` config SFT uses, so the two differ in initialisation and nothing
-   else — and was launched, but died with the compute budget (§6). It is a run away, not a
-   build away.
-5. **Scale the base model.** 0.6B is at the edge of being able to follow a tool protocol at
-   all; a good deal of the measured variance is protocol noise rather than decision quality.
+1. **Attack premature termination, the failure the data actually names.** §4 shows the
+   problem is not syntax (0% malformed) but stopping after one call. The lever is the
+   decision to continue, so I would reward reaching the *next* required action rather than
+   only the final state, and check whether the progress term already does this or is too
+   coarse at 1–3 oracle actions.
+2. **Attack `frac_reward_zero_std`.** Half of all groups produced no gradient — the direct
+   consequence of the bimodal outcomes in §4. Filtering groups whose rollouts all agree, and
+   sampling difficulty against a running per-family success estimate, is the cheapest large
+   win available.
+3. **Finish the ablation grid: SFT-only, RL-only, SFT→RL**, at 0.6B and 1.7B, 3 seeds. This
+   answers "what did RL add over more imitation?", which a single path cannot. The RL-only
+   arm is already implemented (`--adapter none` builds a fresh LoRA from the same
+   `tooluse.train.lora` config SFT uses, so the arms differ in initialisation alone) and was
+   launched before the budget ran out: a run away, not a build away.
+4. **Run BFCL multi-turn** on every checkpoint, plus real τ-bench with an LLM user
+   simulator, to find out whether any of this transfers off-distribution.
+5. **Ablate the reward.** Every shaping term in §2 is a *claim* backed by construction and a
+   unit test, not by measurement. Drop each in turn and watch both final success and whether
+   the term induces hacking.
 6. **Train for pass^k rather than pass^1.** Consistency is what makes a small agent
    deployable, and pass^k is already computed.
-7. **Act on the error taxonomy.** It already exists (§4) and already points somewhere
-   specific: premature termination, not malformed syntax, is the failure to attack. A turn
-   penalty is the wrong tool for that; the right one is training on the decision to continue
-   — which is what the per-action progress term is for, and what a longer RL run would test.
-8. **Grow the environment** toward multiple domains using TRL's environment routing, so the
-   taxonomy can be read per domain rather than pooled.
