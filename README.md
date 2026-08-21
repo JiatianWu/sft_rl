@@ -20,19 +20,33 @@ an environment with verifiable rewards, and evaluates all three checkpoints iden
 
 ```bash
 pip install -e .
-pytest                                  # environment, reward and template invariants
-
-modal run modal_app.py::prepare         # build the SFT dataset into the volume
-modal run modal_app.py::smoke           # verify the stack before spending GPU time
-modal run modal_app.py::evaluate --tag base
-modal run modal_app.py::sft
-modal run modal_app.py::evaluate --tag sft --adapter /work/checkpoints/sft
-modal run modal_app.py::grpo
-modal run modal_app.py::evaluate --tag grpo --adapter /work/checkpoints/grpo
+pytest                            # environment, reward and template invariants
+modal run modal_app.py            # the whole loop, from an empty workspace
 ```
 
-`TOOLUSE_GPU` selects the accelerator (defaults to `A10`, the largest tier reachable on a
-Modal account without a payment method on file).
+`modal_app.py::main` runs data prep and a smoke test on CPU, evaluates the base checkpoint,
+then hands off to `finish`, which does **SFT → eval → GRPO → eval inside one container**.
+Keeping the four GPU stages together matters: run as separate Modal functions they cost four
+cold starts and re-download the base weights each time, which is roughly fifteen minutes of
+paid GPU on nothing. `finish` also commits the volume after every stage, so an interruption
+costs one stage rather than the whole run.
+
+```bash
+modal run modal_app.py::resume    # skip the base eval when results/ already has it
+modal run modal_app.py::smoke     # verify the stack before spending GPU time
+```
+
+Individual stages (`prepare`, `sft`, `grpo`, `evaluate`) remain callable for debugging.
+`TOOLUSE_GPU` selects the accelerator, defaulting to `A10` — the largest tier reachable on a
+Modal account with no payment method on file.
+
+Then pull the results down and render the tables:
+
+```bash
+modal volume get tooluse-workspace results ./results --force
+python scripts/collect_results.py     # headline + per-family comparison
+python scripts/error_taxonomy.py      # what the failures actually are
+```
 
 ## The environment: `tau-retail-lite`
 
