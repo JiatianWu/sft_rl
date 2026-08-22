@@ -21,7 +21,19 @@ from tooluse.eval.harness import Episode, aggregate
 
 
 def build_specs(n_seeds: int, families: list[str], difficulty: str) -> list[Any]:
-    seeds = list(TEST_SEEDS)[:n_seeds]
+    """Build the eval task set, refusing to silently shrink it.
+
+    A plain `[:n_seeds]` truncates without complaint, which once produced a base run over 20
+    seeds and an SFT run over 100 and a "regression" that was partly a different task set.
+    Comparability is the whole point of this harness, so an impossible request is an error.
+    """
+    available = list(TEST_SEEDS)
+    if n_seeds > len(available):
+        raise ValueError(
+            f"asked for {n_seeds} eval seeds but the held-out split has {len(available)}. "
+            "Widen TEST_SEEDS rather than comparing checkpoints on different task sets."
+        )
+    seeds = available[:n_seeds]
     return [sample_task(seed, family, difficulty) for seed in seeds for family in families]
 
 
@@ -84,7 +96,9 @@ def main() -> None:
     parser.add_argument("--adapter", default=None)
     parser.add_argument("--tag", required=True, help="checkpoint label, e.g. base / sft / grpo")
     parser.add_argument("--trials", type=int, default=4)
-    parser.add_argument("--n-seeds", type=int, default=20)
+    # Default to the whole held-out split. A smaller default invites two checkpoints being
+    # measured on different task sets simply because one caller passed the flag and one did not.
+    parser.add_argument("--n-seeds", type=int, default=len(list(TEST_SEEDS)))
     parser.add_argument("--difficulty", default="easy")
     parser.add_argument("--max-turns", type=int, default=8)
     parser.add_argument("--temperature", type=float, default=0.7)

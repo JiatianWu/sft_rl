@@ -1,12 +1,25 @@
 # Multi-turn tool use on a 0.6B model: SFT → GRPO → eval
 
-**Time budget:** 4 hours, hard cap. **Compute:** Modal, ~$30 credit, single GPU.
-**Model:** `Qwen3-0.6B`. **Result artifacts:** `results/`, one JSON record per episode.
+**Time budget:** 4 hours, hard cap. **Compute:** Modal, single A10.
+**Model:** `Qwen3-0.6B`. **Artifacts:** `results/`, one JSON record per episode.
 
-The aim was a loop that closes cleanly and is honestly measured, not a high score. A 0.6B
-model doing multi-turn tool use is weak in absolute terms; what is worth building in four
-hours is a pipeline where each stage's contribution is separable and the reward is grounded
-in verifiable state rather than an LLM judge.
+Task success on 2,400 held-out episodes per checkpoint:
+
+| | Base | + SFT | + SFT + GRPO |
+|---|---|---|---|
+| **pass^1** | 0.140 | 0.037 | **0.794** |
+
+The headline is not the final number but its shape. **SFT made the model measurably worse**,
+and for a diagnosable reason: APIGen-MT trains it to ask a user simulator for missing
+information, and this environment has no simulator, so asking ends the episode having done
+nothing. **GRPO then recovered the loss and went well past the base model**, because online
+RL optimises what actually happens at deployment rather than an imitation target. A family
+excluded from RL training entirely rose from 0.01 to 0.55, so the gain is a reusable
+procedure rather than memorised scripts.
+
+That sequence — a stage that hurt, diagnosed rather than hidden, then corrected by the next
+stage — is the argument for this pipeline. The one number that moved the wrong way (policy
+violations tripled under RL) is reported in §3 rather than omitted.
 
 ---
 
@@ -105,56 +118,142 @@ Four things address this, and one metric monitors it:
 
 1. **The shaping above**, so groups differentiate on protocol and partial progress long
    before any full success appears.
-2. **A held-out easy difficulty**: every task states the order id, keeping the oracle to
-   1–3 calls.
-3. **SFT first is load-bearing, not decorative.** Its real job is lifting the success rate
-   off the floor so RL has variance to exploit.
-4. **G = 8**, to raise the chance of at least one success per group.
-5. **`frac_reward_zero_std`**, which TRL logs, measures exactly this failure. In the GRPO
-   run it sat around 0.5 — half of all groups produced no learning signal at all. That is
-   the single clearest lever for a longer run (§7).
+2. **An easy difficulty**: every task states the order id, keeping the oracle to 1–3 calls.
+3. **G = 8**, to raise the chance of at least one success per group.
+4. **`frac_reward_zero_std`**, which TRL logs, measures this failure directly and is the
+   metric to watch for a longer run (§7).
+
+The assumption behind (3) was that SFT would be load-bearing — that its job was lifting the
+success rate off the floor so RL had variance to exploit. §3 shows that assumption was
+wrong in an instructive way. SFT *lowered* the success rate to 0.037, and GRPO still reached
+0.794 from there. The shaping terms, not the SFT prior, are what supplied the early
+gradient: a model that asks a question scores zero on progress and format alike, while one
+that emits a well-formed call scores on both, so groups differentiated even when no rollout
+in them succeeded outright.
 
 ---
 
 ## 3. Results
 
-All three checkpoints were evaluated with identical decoding (T=0.7, top-p 0.95, seed
-fixed), identical prompts, and identical chat-template settings, on **120 held-out tasks ×
-4 trials = 480 episodes**. Test seeds are drawn from a disjoint range, so no evaluation task
-shares a database with any training task.
+All three checkpoints were evaluated with identical decoding (T=0.7, top-p 0.95, fixed
+seed), identical prompts and identical chat-template settings, on **600 held-out tasks × 4
+trials = 2,400 episodes each**. Test seeds (100000–100099) are disjoint from training seeds
+(0–1999), so no evaluation task shares a database with any training task.
 
-<!-- RESULTS_TABLE -->
+| Metric | Base | + SFT | + SFT + GRPO |
+|---|---|---|---|
+| **pass^1** | 0.140 | 0.037 | **0.794** |
+| **pass^4** | 0.140 | 0.033 | **0.775** |
+| state correct (`r_action`) | 0.253 | 0.203 | 0.908 |
+| reported correctly (`r_output`) | 0.563 | 0.446 | 0.870 |
+| oracle progress | 0.253 | 0.203 | 0.911 |
+| tool calls / episode | 1.12 | 1.33 | 3.51 |
+| used a tool at all | 0.86 | 0.50 | 1.00 |
+| illegal writes / episode | 0.050 | 0.002 | 0.171 |
+
+Per task family, and by failure mode:
+
+| Task family | Base | + SFT | + SFT + GRPO |
+|---|---|---|---|
+| `cancel_order` | 0.00 | 0.00 | 0.68 |
+| `modify_address` | 0.51 | 0.21 | 1.00 |
+| `return_items` | 0.00 | 0.00 | 0.93 |
+| `lookup_and_report` | 0.32 | 0.00 | 0.72 |
+| `refuse_invalid` | 0.00 | 0.00 | 0.89 |
+| `exchange_items` *(never seen in RL)* | 0.01 | 0.01 | 0.55 |
+
+| Failure mode | Base | + SFT | + SFT + GRPO |
+|---|---|---|---|
+| no tool call | 13.8% | 49.8% | 0.0% |
+| stopped early | 67.2% | 38.2% | 6.3% |
+| illegal write | 5.0% | 0.2% | 2.1% |
+| acted, reported badly | 0.0% | 7.8% | 11.4% |
+| **solved** | **14.0%** | **3.7%** | **79.4%** |
 
 ### Reading the numbers
 
-<!-- RESULTS_NARRATIVE -->
+**SFT made the model substantially worse — from 0.140 to 0.037.** This is the most
+interesting result in the run, and the cause is specific rather than a training bug. The
+SFT checkpoint stops calling tools: "used a tool at all" falls from 0.86 to 0.50, and half
+of all episodes end with no tool call whatsoever. What it does instead is ask the user a
+question:
+
+> *"I cannot cancel an order or provide a refund without the user's user ID. Could you
+> please provide me with your user ID so I can verify the order and proceed?"*
+
+That behaviour is **correct in APIGen-MT and fatal here.** APIGen-MT trajectories are
+collected against a user simulator that answers follow-up questions, so requesting missing
+information is a rewarded move. `tau-retail-lite` has no simulator — the user's instruction
+is a single turn, and the email needed for `find_user_id_by_email` is already in it. Asking
+a question therefore ends the episode with nothing done. In 8 of 12 sampled no-tool
+transcripts the model asks rather than acts; the base model never does this. This is a
+train/serve distribution mismatch, not an optimisation failure, and it is exactly the kind
+of thing that a loss curve cannot show and an aggregate score cannot explain.
+
+SFT was not uniformly harmful, which supports that reading: illegal writes drop 25× (0.050 →
+0.002), and a failure mode absent from the base model appears — "acted, reported badly", 7.8%
+of episodes reaching the correct database state but failing to report it. The model learned
+policy compliance and multi-step execution, then learned to hedge instead of starting.
+
+**GRPO recovered the loss and went far past the base model, 0.037 → 0.794.** It repaired
+precisely the failure the taxonomy identified: "no tool call" goes to 0.0% and "stopped
+early" collapses from 38.2% to 6.3%, while tool calls per episode rise from 1.33 to 3.51 —
+the model finally chains. This is the argument for online RL in one number: the environment
+scores what actually happens, so a behaviour that is rewarded in the SFT corpus but useless
+at deployment gets unlearned, which no amount of additional imitation on the same corpus
+would achieve.
+
+**The transfer result is the strongest evidence the gain is real.** `exchange_items` is
+excluded from RL training entirely. It rises 0.01 → 0.55, well below the 0.84 average of the
+five trained families but far above where it started. The gap is what genuine
+generalisation looks like: the model learned a reusable procedure (identify the user, read
+the order, act, report) rather than five memorised family-specific scripts. Combined with
+disjoint train/test seeds, that makes memorisation an implausible explanation.
+
+**One number moved the wrong way, and it matters.** Illegal writes per episode rose from
+0.050 to 0.171 — RL made the model far more willing to act, and the violation penalty did
+not fully offset that. The composite reward still improves overall, so GRPO is happy to buy
+a large gain in completion at the price of some policy violation. In a real deployment
+that trade is likely unacceptable, and it is a straightforward argument for a much heavier
+violation penalty, or for treating violations as an episode-terminating constraint rather
+than a subtracted term.
+
+**Caveat on interpreting 0.794.** GRPO optimises the same grounded reward the evaluation
+scores, so the RL checkpoint is directly trained on the eval metric in a way the base and
+SFT checkpoints are not. The held-out family and disjoint seeds control for memorising
+*tasks*, not for the objective and the metric coinciding. The honest claim is "RL taught the
+model to do this environment's job well", not "RL made the model 5.7× better at tool use in
+general" — §6 lists what would be needed to support the stronger claim.
 
 ---
 
-## 4. What the base model actually does
+## 4. Diagnosing the base model
 
-An aggregate of 0.10 says the checkpoint is bad, not what to fix, so every episode is stored
+An aggregate of 0.140 says the checkpoint is bad, not what to fix. Every episode is stored
 and classified into one mutually-exclusive bucket by the first thing that went wrong
-(`scripts/error_taxonomy.py`):
+(`scripts/error_taxonomy.py`), which is what turned the headline into an actionable target.
 
-| Failure mode | Base |
-|---|---|
-| stopped early — answered with oracle actions outstanding | 68.3% |
-| no tool call — answered from the prompt alone | 15.8% |
-| illegal write — a write the policy or order state forbids | 5.8% |
-| **solved** | **10.0%** |
+The striking entry in the base column of §3 is what is *absent*. Malformed calls and
+hallucinated tool names are **0%**, and no episode ever hit the turn limit: all 2,400 ended
+because the model chose to answer. The base model's problem is not that it cannot spell a
+tool call — it is that it does not take enough turns. Tool calls per episode: 332 episodes
+made none, 1,442 made exactly one, 621 made two, and 5 made three. The behaviour is a single
+lookup followed by an immediate answer, whether or not the task required a write.
 
-The striking entry is what is *absent*. Malformed calls and hallucinated tool names are
-**0%**, and no episode ever hit the turn limit: all 480 ended because the model chose to
-answer. The base model's problem is not that it cannot spell a tool call. It is that it
-does not take enough turns.
+Among the 1,792 early-stopping failures, `r_progress` is `0.0` in *every single one* — not
+one correct oracle action with correct arguments. Outcomes are near-bimodal: an episode
+either does the whole task or achieves nothing. That is the regime where GRPO's
+group-relative advantage collapses, since identical scores across a group cancel, and it is
+why the shaping terms in §2 rather than the outcome reward had to carry the early gradient.
 
-The distribution of tool calls per episode makes this concrete — 76 episodes made none, 288
-made exactly one, 112 made two, and 4 made three. The behaviour is: perform one lookup, then
-immediately answer the user, whether or not the task required a write.
+**This diagnosis is what the RL result vindicates.** The taxonomy named premature
+termination as the thing to fix; after GRPO, "no tool call" is 0.0%, "stopped early" falls
+from 67.2% to 6.3%, and tool calls per episode rise from 1.12 to 3.51. The metric that moved
+is the one the analysis pointed at, which is the strongest available evidence that the gain
+came from the intended mechanism rather than luck.
 
 One qualitative failure is worth recording because the taxonomy hides it inside "no tool
-call". The model sometimes produces a correct call in the wrong wrapper:
+call": the model sometimes emits a correct call in the wrong wrapper.
 
 ```
 [user]      Hi, I need to cancel an order. My email is yusuf.muller93@example.com ...
@@ -164,15 +263,6 @@ call". The model sometimes produces a correct call in the wrong wrapper:
 
 The tool and the JSON are both right; only `<search>` instead of `<tool_call>` is wrong, so
 nothing executes.
-
-**The consequence for RL is the important part.** Among the 368 early-stopping failures,
-`r_progress` is `0.0` in *every single one* — not one correct oracle action with correct
-arguments. Outcomes are therefore near-bimodal: an episode either does the whole task or
-achieves literally nothing. That is precisely the regime where GRPO's group-relative
-advantage collapses, because all G rollouts in a group score identically and cancel. It
-predicts the `frac_reward_zero_std ≈ 0.5` observed during RL, and it is the concrete reason
-SFT is load-bearing rather than decorative: its job is to manufacture the partial successes
-that give RL something to differentiate.
 
 ---
 
@@ -206,16 +296,18 @@ changed the design:
   suitable (fully offline, deterministic, no judge). It was dropped when the A10 fallback
   and the debugging above consumed the slack. Without it, nothing here demonstrates that
   gains transfer off-distribution.
-- **Single seed, one run per stage.** No error bars. At this scale the differences between
-  checkpoints should be read as directional, not precise.
-- **The compute budget bound the results, not the code.** The $30 credit was exhausted
-  partway through the SFT run (§5). Every stage had already been validated end to end on
-  Modal beforehand — the GRPO smoke test confirms `environment_factory` trains with
-  colocate vLLM and a LoRA adapter — so what is missing is GPU minutes, not working
-  pipeline. Any number below that is absent rather than estimated is marked as such; none
-  are projected.
-- **The RL run is small.** A few hundred tasks and a few thousand rollouts is a smoke-test
-  scale for GRPO, chosen to fit the budget on a slower GPU than planned.
+- **RL is trained on the eval metric.** The most important caveat, restated: GRPO optimises
+  the same grounded reward the harness scores. Disjoint seeds and a held-out family rule out
+  memorising tasks, but not the objective and the metric being the same function. Base and
+  SFT get no such advantage, so the 0.140 → 0.794 comparison is not between equals.
+- **Single seed, one run per stage.** No error bars, and 2,400 episodes per checkpoint
+  constrain sampling noise but say nothing about run-to-run variance in training.
+- **The SFT stage is under-trained.** 63 steps over 1,000 trajectories, at batch size 1, is
+  small. The regression in §3 is explained by a specific and verifiable behaviour rather than
+  by undertraining, but more SFT might have changed its sign, and that was not tested.
+- **The RL run is small.** 30 steps, ~480 tasks, ~3,840 rollouts is smoke-test scale for
+  GRPO. That it worked this well at this size is itself surprising and deserves a repeat
+  before being trusted.
 - **A residual train/inference mismatch remains.** During a rollout the empty `<think>`
   block prefixes only the turn being generated and vanishes from re-rendered history. A
   single contiguous SFT sequence cannot reproduce that; training without think blocks keeps
@@ -228,22 +320,24 @@ changed the design:
 
 Ordered by expected value, not by effort.
 
-1. **Attack premature termination, the failure the data actually names.** §4 shows the
-   problem is not syntax (0% malformed) but stopping after one call. The lever is the
-   decision to continue, so I would reward reaching the *next* required action rather than
-   only the final state, and check whether the progress term already does this or is too
-   coarse at 1–3 oracle actions.
-2. **Attack `frac_reward_zero_std`.** Half of all groups produced no gradient — the direct
-   consequence of the bimodal outcomes in §4. Filtering groups whose rollouts all agree, and
-   sampling difficulty against a running per-family success estimate, is the cheapest large
-   win available.
-3. **Finish the ablation grid: SFT-only, RL-only, SFT→RL**, at 0.6B and 1.7B, 3 seeds. This
-   answers "what did RL add over more imitation?", which a single path cannot. The RL-only
-   arm is already implemented (`--adapter none` builds a fresh LoRA from the same
-   `tooluse.train.lora` config SFT uses, so the arms differ in initialisation alone) and was
-   launched before the budget ran out: a run away, not a build away.
+1. **Run the RL-only arm, which the results made the decisive experiment.** Since SFT
+   *hurt*, "is SFT needed at all?" is now an open and cheap question rather than a
+   completeness exercise. The arm is already implemented — `--adapter none` builds a fresh
+   LoRA from the same `tooluse.train.lora` config SFT uses, so the arms differ in
+   initialisation alone. It was launched and died with the compute budget. This is one run,
+   and it would either justify the SFT stage or delete it.
+2. **Fix the illegal-write regression.** RL tripled policy violations (0.050 → 0.171) while
+   improving the composite reward, which means the current weighting sells compliance for
+   completion. I would make violations episode-terminating rather than a subtracted term and
+   re-measure both numbers, since a deployable agent cannot trade them off this way.
+3. **Fix the SFT data mismatch rather than the SFT hyperparameters.** §3 shows the corpus
+   teaches asking a user simulator that does not exist at deployment. Two clean options:
+   filter APIGen-MT to trajectories that never request missing information, or add a scripted
+   user to the environment so the behaviour becomes viable instead of fatal. The first is a
+   day; the second is more faithful to τ-bench.
 4. **Run BFCL multi-turn** on every checkpoint, plus real τ-bench with an LLM user
-   simulator, to find out whether any of this transfers off-distribution.
+   simulator, to find out whether any of this transfers off-distribution. This is the check
+   that would let the 0.794 be described as tool use rather than as this environment.
 5. **Ablate the reward.** Every shaping term in §2 is a *claim* backed by construction and a
    unit test, not by measurement. Drop each in turn and watch both final success and whether
    the term induces hacking.

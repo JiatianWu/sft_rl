@@ -202,7 +202,7 @@ def grpo(
 
 
 @app.function(gpu=GPU, volumes=VOLUMES, timeout=2 * HOURS)
-def evaluate(tag: str, adapter: str | None = None, n_seeds: int = 20, trials: int = 4) -> None:
+def evaluate(tag: str, adapter: str | None = None, n_seeds: int = 100, trials: int = 4) -> None:
     import subprocess
 
     command = [
@@ -225,7 +225,7 @@ def evaluate(tag: str, adapter: str | None = None, n_seeds: int = 20, trials: in
 
 
 @app.function(gpu=GPU, volumes=VOLUMES, timeout=4 * HOURS)
-def finish(sft_limit: int = 1000, grpo_steps: int = 30, n_seeds: int = 120, trials: int = 4) -> None:
+def finish(sft_limit: int = 1000, grpo_steps: int = 30, n_seeds: int = 100, trials: int = 4) -> None:
     """SFT -> eval -> GRPO -> eval inside a single container.
 
     Running these as four separate Modal functions costs four cold starts, and each one
