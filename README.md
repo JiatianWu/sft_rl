@@ -6,6 +6,24 @@ an environment with verifiable rewards, and evaluates all three checkpoints iden
 
 - **[PLAN.md](PLAN.md)** — the plan, written before any code.
 - **[WRITEUP.md](WRITEUP.md)** — results, reward design, trade-offs, and what failed.
+- **[ENGINEERING_NOTES.md](ENGINEERING_NOTES.md)** — the things that cost time.
+
+## Results
+
+Task success on 2,400 held-out episodes per checkpoint, identical decoding throughout:
+
+| | Base | + SFT | + SFT + GRPO |
+|---|---|---|---|
+| **pass^1** | 0.140 | 0.037 | **0.794** |
+| used a tool at all | 0.86 | 0.50 | 1.00 |
+| tool calls / episode | 1.12 | 1.33 | 3.51 |
+| illegal writes / episode | 0.050 | 0.002 | 0.171 |
+
+SFT **hurt**: APIGen-MT teaches the model to ask a user simulator for missing information,
+and this environment has none, so half of SFT episodes end without a tool call. GRPO then
+recovered the loss and went well past base, and a task family held out of RL entirely rose
+from 0.01 to 0.55. Policy violations tripled under RL — reported, not hidden. Full analysis
+in [WRITEUP.md](WRITEUP.md) §3.
 
 ## The loop
 

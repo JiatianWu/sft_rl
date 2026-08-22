@@ -47,7 +47,7 @@ baseline suits a binary task reward.
 and is copied directly (below), but the benchmark needs an LLM user simulator: API cost,
 nondeterminism and latency inside the RL loop. A procedural environment gives thousands of
 tasks, a train/test split sharing no database, and a free deterministic reward. The cost is
-stated plainly in §6 — the headline number is measured on a benchmark I wrote.
+stated plainly in §5 — the headline number is measured on a benchmark I wrote.
 
 **Stock PEFT instead of Unsloth.** Unsloth would have roughly halved SFT time, but it pins
 its own `transformers` while TRL's `environment_factory` needs `transformers>=5.2`. The ~10
@@ -121,7 +121,7 @@ Four things address this, and one metric monitors it:
 2. **An easy difficulty**: every task states the order id, keeping the oracle to 1–3 calls.
 3. **G = 8**, to raise the chance of at least one success per group.
 4. **`frac_reward_zero_std`**, which TRL logs, measures this failure directly and is the
-   metric to watch for a longer run (§7).
+   metric to watch for a longer run (§6).
 
 The assumption behind (3) was that SFT would be load-bearing — that its job was lifting the
 success rate off the floor so RL had variance to exploit. §3 shows that assumption was
@@ -172,101 +172,64 @@ Per task family, and by failure mode:
 
 ### Reading the numbers
 
-**SFT made the model substantially worse — from 0.140 to 0.037.** This is the most
-interesting result in the run, and the cause is specific rather than a training bug. The
-SFT checkpoint stops calling tools: "used a tool at all" falls from 0.86 to 0.50, and half
-of all episodes end with no tool call whatsoever. What it does instead is ask the user a
-question:
+**SFT made the model worse, 0.140 → 0.037, for a diagnosable reason.** The SFT checkpoint
+stops calling tools — "used a tool at all" falls from 0.86 to 0.50 — and what it does
+instead is ask a question:
 
 > *"I cannot cancel an order or provide a refund without the user's user ID. Could you
 > please provide me with your user ID so I can verify the order and proceed?"*
 
-That behaviour is **correct in APIGen-MT and fatal here.** APIGen-MT trajectories are
-collected against a user simulator that answers follow-up questions, so requesting missing
-information is a rewarded move. `tau-retail-lite` has no simulator — the user's instruction
-is a single turn, and the email needed for `find_user_id_by_email` is already in it. Asking
-a question therefore ends the episode with nothing done. In 8 of 12 sampled no-tool
-transcripts the model asks rather than acts; the base model never does this. This is a
-train/serve distribution mismatch, not an optimisation failure, and it is exactly the kind
-of thing that a loss curve cannot show and an aggregate score cannot explain.
+That is **correct in APIGen-MT and fatal here.** Those trajectories are collected against a
+user simulator that answers follow-ups, so requesting missing information is rewarded.
+`tau-retail-lite` has no simulator: the instruction is a single turn and already contains
+the email `find_user_id_by_email` needs, so asking ends the episode having done nothing. In
+8 of 12 sampled no-tool transcripts the model asks rather than acts; the base model never
+does. This is a train/serve distribution mismatch, not an optimisation failure — the kind of
+thing a loss curve cannot show and an aggregate cannot explain.
 
-SFT was not uniformly harmful, which supports that reading: illegal writes drop 25× (0.050 →
-0.002), and a failure mode absent from the base model appears — "acted, reported badly", 7.8%
-of episodes reaching the correct database state but failing to report it. The model learned
-policy compliance and multi-step execution, then learned to hedge instead of starting.
+SFT was not uniformly harmful, which supports that reading: illegal writes fall 25×
+(0.050 → 0.002) and a new bucket appears, "acted, reported badly" at 7.8% — correct database
+state, no report. It learned policy compliance and multi-step execution, then learned to
+hedge instead of starting.
 
-**GRPO recovered the loss and went far past the base model, 0.037 → 0.794.** It repaired
-precisely the failure the taxonomy identified: "no tool call" goes to 0.0% and "stopped
-early" collapses from 38.2% to 6.3%, while tool calls per episode rise from 1.33 to 3.51 —
-the model finally chains. This is the argument for online RL in one number: the environment
-scores what actually happens, so a behaviour that is rewarded in the SFT corpus but useless
-at deployment gets unlearned, which no amount of additional imitation on the same corpus
-would achieve.
+**GRPO recovered the loss and went well past base, 0.037 → 0.794**, repairing exactly the
+failure the taxonomy named: "no tool call" to 0.0%, "stopped early" from 38.2% to 6.3%, tool
+calls per episode from 1.33 to 3.51. The model finally chains. This is the case for online
+RL in one number — the environment scores what actually happens, so a behaviour rewarded by
+the SFT corpus but useless at deployment gets unlearned, which more imitation on that same
+corpus could not achieve.
 
-**The transfer result is the strongest evidence the gain is real.** `exchange_items` is
-excluded from RL training entirely. It rises 0.01 → 0.55, well below the 0.84 average of the
-five trained families but far above where it started. The gap is what genuine
-generalisation looks like: the model learned a reusable procedure (identify the user, read
-the order, act, report) rather than five memorised family-specific scripts. Combined with
-disjoint train/test seeds, that makes memorisation an implausible explanation.
+**The transfer result is the best evidence the gain is real.** `exchange_items`, excluded
+from RL entirely, rises 0.01 → 0.55 — well below the 0.84 average of trained families, far
+above where it started. That gap is what generalisation looks like: a reusable procedure
+(identify user, read order, act, report) rather than five memorised scripts. With disjoint
+seeds, memorisation is not a plausible explanation.
 
-**One number moved the wrong way, and it matters.** Illegal writes per episode rose from
-0.050 to 0.171 — RL made the model far more willing to act, and the violation penalty did
-not fully offset that. The composite reward still improves overall, so GRPO is happy to buy
-a large gain in completion at the price of some policy violation. In a real deployment
-that trade is likely unacceptable, and it is a straightforward argument for a much heavier
-violation penalty, or for treating violations as an episode-terminating constraint rather
-than a subtracted term.
+**One number moved the wrong way.** Illegal writes rose 0.050 → 0.171. RL made the model far
+more willing to act and the violation penalty did not offset it, so GRPO bought completion
+at the price of compliance. For a real deployment that trade is unacceptable, and it argues
+for violations terminating an episode rather than being subtracted from it.
 
-**Caveat on interpreting 0.794.** GRPO optimises the same grounded reward the evaluation
-scores, so the RL checkpoint is directly trained on the eval metric in a way the base and
-SFT checkpoints are not. The held-out family and disjoint seeds control for memorising
-*tasks*, not for the objective and the metric coinciding. The honest claim is "RL taught the
-model to do this environment's job well", not "RL made the model 5.7× better at tool use in
-general" — §6 lists what would be needed to support the stronger claim.
+**Caveat on 0.794.** GRPO optimises the same reward the harness scores, so the RL checkpoint
+is trained on the eval metric in a way base and SFT are not. Disjoint seeds and a held-out
+family control for memorising *tasks*, not for objective and metric coinciding. The honest
+claim is that RL taught the model to do this environment's job well, not that it is 5.7×
+better at tool use in general.
 
----
-
-## 4. Diagnosing the base model
-
-An aggregate of 0.140 says the checkpoint is bad, not what to fix. Every episode is stored
-and classified into one mutually-exclusive bucket by the first thing that went wrong
-(`scripts/error_taxonomy.py`), which is what turned the headline into an actionable target.
-
-The striking entry in the base column of §3 is what is *absent*. Malformed calls and
-hallucinated tool names are **0%**, and no episode ever hit the turn limit: all 2,400 ended
-because the model chose to answer. The base model's problem is not that it cannot spell a
-tool call — it is that it does not take enough turns. Tool calls per episode: 332 episodes
-made none, 1,442 made exactly one, 621 made two, and 5 made three. The behaviour is a single
-lookup followed by an immediate answer, whether or not the task required a write.
-
-Among the 1,792 early-stopping failures, `r_progress` is `0.0` in *every single one* — not
-one correct oracle action with correct arguments. Outcomes are near-bimodal: an episode
-either does the whole task or achieves nothing. That is the regime where GRPO's
-group-relative advantage collapses, since identical scores across a group cancel, and it is
-why the shaping terms in §2 rather than the outcome reward had to carry the early gradient.
-
-**This diagnosis is what the RL result vindicates.** The taxonomy named premature
-termination as the thing to fix; after GRPO, "no tool call" is 0.0%, "stopped early" falls
-from 67.2% to 6.3%, and tool calls per episode rise from 1.12 to 3.51. The metric that moved
-is the one the analysis pointed at, which is the strongest available evidence that the gain
-came from the intended mechanism rather than luck.
-
-One qualitative failure is worth recording because the taxonomy hides it inside "no tool
-call": the model sometimes emits a correct call in the wrong wrapper.
-
-```
-[user]      Hi, I need to cancel an order. My email is yusuf.muller93@example.com ...
-[assistant] <search> {"name": "find_user_id_by_email",
-                      "arguments": {"email": "yusuf.muller93@example.com"}} </search>
-```
-
-The tool and the JSON are both right; only `<search>` instead of `<tool_call>` is wrong, so
-nothing executes.
+**How the target was chosen.** An aggregate of 0.140 says a checkpoint is bad, not what to
+fix, so every episode is classified into one mutually-exclusive bucket by the first thing
+that went wrong (`scripts/error_taxonomy.py`). The informative entry in the base column is
+what is *absent*: malformed calls and hallucinated tools are **0%**, and no episode hit the
+turn limit — all 2,400 ended because the model chose to answer. It is not that the model
+cannot spell a tool call; it does not take enough turns. Among the 1,792 early stops,
+`r_progress` is `0.0` in *every one*, so outcomes are near-bimodal — whole task or nothing,
+the regime where group-relative advantage collapses. The taxonomy named premature
+termination as the target, and that is precisely the metric RL moved, which is the best
+available evidence the gain came from the intended mechanism rather than luck.
 
 ---
 
-## 5. Engineering findings
+## 4. Engineering findings
 
 Full list in [`ENGINEERING_NOTES.md`](ENGINEERING_NOTES.md); each was found by running the
 producing code rather than trusting a doc, and each is pinned by a test. The four that
@@ -287,7 +250,7 @@ changed the design:
 
 ---
 
-## 6. Honest limitations
+## 5. Honest limitations
 
 - **The headline benchmark is one I wrote.** Train and test share no database and one task
   family is held out of RL entirely, which controls for memorisation but not for the
@@ -316,7 +279,7 @@ changed the design:
 
 ---
 
-## 7. What a week would buy
+## 6. What a week would buy
 
 Ordered by expected value, not by effort.
 
