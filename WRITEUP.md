@@ -245,8 +245,9 @@ changed the design:
 - **Thinking had to be disabled for a fair baseline** — with it on, the 0.6B spends its
   whole budget reasoning and never calls a tool, which would have handicapped the *base*
   checkpoint specifically and inflated SFT's apparent gain.
-- **A Modal spend limit is reported as "waiting for capacity."** Transient scarcity and a
-  dead budget look identical in the logs, and the difference is fifteen minutes of waiting.
+- **A Modal spend limit is reported as "waiting for capacity",** and it is not the credit
+  balance: $1.40 of ~$30 had been spent when everything stopped. Transient scarcity, a dead
+  budget and a settings cap all look identical in the logs.
 
 ---
 
@@ -287,8 +288,9 @@ Ordered by expected value, not by effort.
    *hurt*, "is SFT needed at all?" is now an open and cheap question rather than a
    completeness exercise. The arm is already implemented — `--adapter none` builds a fresh
    LoRA from the same `tooluse.train.lora` config SFT uses, so the arms differ in
-   initialisation alone. It was launched and died with the compute budget. This is one run,
-   and it would either justify the SFT stage or delete it.
+   initialisation alone. It was launched and stopped when the workspace hit its spend cap.
+   At the measured rate a 30-step run costs about **$0.15**, and it would either justify the
+   SFT stage or delete it.
 2. **Fix the illegal-write regression.** RL tripled policy violations (0.050 → 0.171) while
    improving the composite reward, which means the current weighting sells compliance for
    completion. I would make violations episode-terminating rather than a subtracted term and

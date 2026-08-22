@@ -60,13 +60,24 @@ to JIT-compile them on every cold start without a host C++ toolchain.
 memory at 8192 tokens; batch 2 tried to allocate 8 GiB for cross-entropy alone. Effective
 batch size is preserved with 16 gradient accumulation steps.
 
-**A spend limit surfaces as a scheduling message, not a billing error.** When the credit ran
-out mid-SFT, the job was evicted at step 49/125 and the log said only that it was *"waiting
-to be scheduled on a GPU_A10G worker … we are actively working on acquiring more capacity"*.
-That reads as transient scarcity, so the correct response (stop waiting, change something)
-looks exactly like the wrong one. Only an unrelated command surfaced the actual cause:
-`Workspace ... has exceeded its spend limit`. Worth knowing before you spend fifteen minutes
-waiting politely for capacity that will never arrive.
+**A spend limit surfaces as a scheduling message, not a billing error.** Mid-SFT the job was
+evicted at step 49/125, and the log said only that it was *"waiting to be scheduled on a
+GPU_A10G worker … we are actively working on acquiring more capacity"*. That reads as
+transient scarcity, so the correct response (stop waiting, change something) looks exactly
+like the wrong one. Only an unrelated command surfaced the real cause: `Workspace ... has
+exceeded its spend limit`.
+
+**And the spend limit is not the credit balance.** The natural reading of that error is "the
+credit is gone", which was wrong by more than an order of magnitude: `modal billing summary`
+showed **$1.40 of ~$30 spent** at the point everything stopped. A free workspace carries a
+separate spend cap that binds long before the credit does. Adding a payment method lifts the
+cap and is the right fix either way, but diagnosing it as an exhausted balance would send you
+looking for a new account instead of a settings change. Check `modal billing summary` before
+believing any story about why a job will not schedule.
+
+**The whole project cost $2.08**, of which $1.91 was A10 GPU time — and roughly $0.57 of that
+was burned by the preempted SFT run and a stopped ablation. The four stages that produced the
+reported numbers cost $0.89 together.
 
 **Checkpoint per stage, not per pipeline.** The eviction cost the entire SFT run, because
 the adapter is only written at the end. Worse, splitting the pipeline across four Modal
