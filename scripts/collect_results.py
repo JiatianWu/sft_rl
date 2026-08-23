@@ -17,6 +17,7 @@ TAGS = [
     ("sft", "+ SFT"),
     ("rl_only", "GRPO only"),
     ("grpo", "+ SFT + GRPO"),
+    ("grpo_long", "+ SFT + GRPO (long)"),
 ]
 
 HEADLINE = [

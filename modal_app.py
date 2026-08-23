@@ -282,6 +282,49 @@ def finish(sft_limit: int = 1000, grpo_steps: int = 30, n_seeds: int = 100, tria
     print("\n[finish] all four stages complete", flush=True)
 
 
+@app.function(gpu=GPU, volumes=VOLUMES, timeout=5 * HOURS)
+def rl_arm(
+    tag: str,
+    adapter: str = "none",
+    steps: int = 30,
+    n_seeds: int = 100,
+    trials: int = 4,
+) -> None:
+    """One RL arm end to end: GRPO then evaluation, in a single container.
+
+    Used for the two experiments the results made worth running — an RL-only arm
+    (`adapter="none"`, a fresh LoRA) to find out whether the SFT stage earns its place given
+    that it *lowered* success, and a longer run from the SFT adapter to test whether the
+    residual failures are undertraining rather than design.
+    """
+    import subprocess
+
+    output = f"/work/checkpoints/{tag}"
+    train = [
+        "python", "-m", "tooluse.train.grpo",
+        "--output", output,
+        "--steps", str(steps),
+    ]
+    if adapter and adapter != "none":
+        train += ["--adapter", adapter]
+
+    print(f"\n{'=' * 70}\n[{tag}] GRPO, {steps} steps, adapter={adapter}\n{'=' * 70}", flush=True)
+    subprocess.run(train, check=True)
+    workspace.commit()
+
+    print(f"\n{'=' * 70}\n[{tag}] eval\n{'=' * 70}", flush=True)
+    subprocess.run(
+        [
+            "python", "-m", "tooluse.eval.run_eval",
+            "--tag", tag, "--adapter", output,
+            "--n-seeds", str(n_seeds), "--trials", str(trials), "--out", "/work/results",
+        ],
+        check=True,
+    )
+    workspace.commit()
+    print(f"[{tag}] done", flush=True)
+
+
 @app.function(volumes=VOLUMES, timeout=1 * HOURS)
 def fetch(path: str) -> bytes:
     """Read a file back out of the workspace volume."""

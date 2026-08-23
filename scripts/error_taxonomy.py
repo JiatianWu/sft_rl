@@ -18,7 +18,13 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-TAGS = [("base", "Base"), ("sft", "+ SFT"), ("rl_only", "GRPO only"), ("grpo", "+ SFT + GRPO")]
+TAGS = [
+    ("base", "Base"),
+    ("sft", "+ SFT"),
+    ("rl_only", "GRPO only"),
+    ("grpo", "+ SFT + GRPO"),
+    ("grpo_long", "+ SFT + GRPO (long)"),
+]
 
 # Ordered: the first matching rule wins, so each episode is counted once.
 BUCKETS = [
