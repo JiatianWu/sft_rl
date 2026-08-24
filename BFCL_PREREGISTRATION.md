@@ -200,7 +200,46 @@ for a restraint gain to mean anything.
 
 ---
 
-# Outcome
+# Follow-up 4: do the two goals trade, or was that the control talking?
+
+Pre-registered before training `sft_1500` / `grpo_1500`, same rules.
+
+§3.7 and §3.8 together read as a dilemma: adding parallel-call data repairs BFCL AST (0.371 →
+0.728) but destroys SFT's value as an RL prior (0.797 → 0.475, against 0.496 from no prior at all).
+Stated that way it sounds like a property of the model. It is not obviously anything of the kind —
+**the total was held at 1,000 trajectories as an experimental control, so that composition was the
+only variable, and a control is not a budget.** Under a fixed total, adding Hermes necessarily
+removes APIGen, and §3.8 showed the removed APIGen is what carries retail protocol. The dilemma may
+be entirely an artifact of my own comparison design.
+
+**The intervention.** `sft_1500` keeps all 1,000 APIGen trajectories and *adds* 500 Hermes on top,
+so nothing is removed. `grpo_1500` then runs 30 GRPO steps from it, matching `grpo` and
+`grpo_mixed` step for step. Cost is about twenty minutes more SFT.
+
+**P15 — `grpo_1500` lands well above `grpo_mixed`'s 0.475, and above RL-only's 0.496.** The whole
+claim: restoring the APIGen trajectories restores the prior. I expect 0.65–0.80 rather than a clean
+return to 0.797, since Hermes still dilutes the corpus (APIGen falls from 100% to 67% of it) and
+teaches eagerness that the retail protocol does not want.
+
+*Refuted if* it stays near 0.475, which would mean the prior was destroyed by *adding* Hermes
+rather than by removing APIGen, and §3.8's trade is real rather than an artifact.
+
+**P16 — `sft_1500` keeps parallel calling, above 0.5 on BFCL `parallel`.** The absolute number of
+multi-call demonstrations is unchanged at 284, so the capability should survive; but their *share*
+of tool-calling turns falls from 12.9% to roughly 8.6%, so I expect somewhat below `sft_mixed`'s
+0.705 rather than at it.
+
+*Refuted if* `parallel` falls back toward zero, which would mean what matters is the proportion of
+parallel examples rather than their presence — a materially different lesson from §3.7's.
+
+**P17 — `sft_1500` abstains better than `sft_mixed` (should-not-call above 0.642).** Two thirds
+APIGen instead of one half should pull back along the act/abstain axis, since APIGen is the
+abstemious source. Weak, and stated so a shift cannot be presented as a surprise.
+
+**What would make this uninformative.** If P15 and P16 both hold, the honest reading is that
+§3.7/§3.8's dilemma was my control talking and the two goals never traded — which would mean the
+most quotable finding in those sections needs rewriting rather than defending. Stating that here,
+before the run, is the point.
 
 Added after the run. Full numbers and discussion in `WRITEUP.md` §3.6; reproduce with
 `python scripts/bfcl_table.py`.

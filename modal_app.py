@@ -434,6 +434,8 @@ BFCL_ARMS = {
     "sft_mixed": "/work/checkpoints/sft_mixed",
     "grpo_mixed": "/work/checkpoints/grpo_mixed",
     "grpo_abstain": "/work/checkpoints/grpo_abstain",
+    "sft_1500": "/work/checkpoints/sft_1500",
+    "grpo_1500": "/work/checkpoints/grpo_1500",
 }
 
 
@@ -527,32 +529,42 @@ def bfcl_probe() -> None:
 
 
 @app.function(gpu=GPU, volumes=VOLUMES, timeout=5 * HOURS)
-def mixed_arm(apigen: int = 500, hermes: int = 500, n_seeds: int = 100, trials: int = 4) -> None:
+def mixed_arm(
+    apigen: int = 500,
+    hermes: int = 500,
+    tag: str = "sft_mixed",
+    n_seeds: int = 100,
+    trials: int = 4,
+) -> None:
     """SFT on a corpus that actually contains parallel calls, then evaluate in-domain.
 
     Tests one hypothesis: BFCL `parallel` collapsing to 0/200 is caused by the *absence* of
-    multi-call examples, not by capacity loss or general forgetting. Total trajectories are held
-    at 1,000 to match the existing `sft` arm, so the only variable is composition.
+    multi-call examples, not by capacity loss or general forgetting. At the default 500/500 the
+    total is held at 1,000 to match the existing `sft` arm, so composition is the only variable.
 
-    The in-domain eval is here because the mix halves the APIGen share, and APIGen is what makes
-    SFT valuable as an RL prior (+0.301, §3.1). Buying parallel calling by destroying the prior
-    would be a bad trade, and only measuring both shows it.
+    That control turned out to be expensive. §3.8 found the substitution costs the whole of SFT's
+    value as an RL prior, because the removed APIGen trajectories are what carry retail protocol —
+    so `parallel` and the prior appeared to trade directly. But 1,000 was a control, not a budget,
+    and `--apigen 1000 --hermes 500` tests whether they trade at all once the cap is lifted.
+
+    `tag` names both the corpus and the checkpoint, so a second composition cannot overwrite the
+    first — the arms have to coexist for the comparison to be possible.
     """
     import subprocess
 
     def stage(name: str, command: list[str]) -> None:
-        print(f"\n{'=' * 70}\n[mixed] {name}\n{'=' * 70}", flush=True)
+        print(f"\n{'=' * 70}\n[{tag}] {name}\n{'=' * 70}", flush=True)
         subprocess.run(command, check=True)
         workspace.commit()
-        print(f"[mixed] {name} committed", flush=True)
+        print(f"[{tag}] {name} committed", flush=True)
 
     stage(
-        "1/3 build mixed corpus",
+        f"1/3 build corpus ({apigen} apigen + {hermes} hermes)",
         [
             "python", "-m", "tooluse.data.prepare_sft",
             "--limit", str(apigen),
             "--hermes", str(hermes),
-            "--out", "/work/data/sft_mixed.jsonl",
+            "--out", f"/work/data/{tag}.jsonl",
             "--cache", "/cache/apigen-mt_5k.json",
         ],
     )
@@ -560,8 +572,8 @@ def mixed_arm(apigen: int = 500, hermes: int = 500, n_seeds: int = 100, trials: 
         "2/3 SFT",
         [
             "python", "-m", "tooluse.train.sft",
-            "--data", "/work/data/sft_mixed.jsonl",
-            "--output", "/work/checkpoints/sft_mixed",
+            "--data", f"/work/data/{tag}.jsonl",
+            "--output", f"/work/checkpoints/{tag}",
             "--limit", str(apigen + hermes),
             "--max-length", "8192",
         ],
@@ -570,11 +582,11 @@ def mixed_arm(apigen: int = 500, hermes: int = 500, n_seeds: int = 100, trials: 
         "3/3 eval in-domain",
         [
             "python", "-m", "tooluse.eval.run_eval",
-            "--tag", "sft_mixed", "--adapter", "/work/checkpoints/sft_mixed",
+            "--tag", tag, "--adapter", f"/work/checkpoints/{tag}",
             "--n-seeds", str(n_seeds), "--trials", str(trials), "--out", "/work/results",
         ],
     )
-    print("\n[mixed] done — run merge_adapters then bfcl_sweep for the external numbers", flush=True)
+    print(f"\n[{tag}] done — run merge_adapters then bfcl_sweep for the external numbers", flush=True)
 
 
 @app.function(volumes=VOLUMES, timeout=30 * 60)
