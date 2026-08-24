@@ -67,6 +67,73 @@ Worth noting the aggregate never showed it. What showed it was `return_items` re
 0.93 in three independently trained arms — a number too stable across different checkpoints to
 be a property of any of them.
 
+## Running an external benchmark on your own checkpoints
+
+Four traps, in the order they fired. Three of them fail *silently* and produce numbers that look
+entirely reasonable, which is the part worth internalising.
+
+**BFCL's `--lora-modules` does not evaluate your LoRA.** The README says the flag "allows
+evaluation of fine-tuned models with LoRA adapters". It forwards the adapter to `vllm serve`,
+which registers it — and then every request BFCL sends names the base model:
+
+```python
+api_response = self.client.completions.create(
+    model=self.model_path_or_id,   # always the base path, never a LoRA name
+```
+
+So the adapter loads and is never applied. Following the documentation would have produced four
+identical copies of the base numbers and a confident "nothing transfers" writeup. Reading the
+handler took two minutes; the wrong version of that conclusion would have been permanent.
+The workaround is to merge each adapter into full weights and point `--local-model-path` at it.
+
+**Merging with `snapshot_download` sidecars overwrote the merged weights.** The merged model must
+carry tokenizer and config files, and the natural way to get version-neutral ones is:
+
+```python
+hub = Path(snapshot_download(base_id, allow_patterns=["*.json", "*.txt", "*.jinja"]))
+sidecars = [p for p in hub.iterdir() if p.is_file()]      # ← wrong
+```
+
+`allow_patterns` restricts what gets *downloaded*, not what the directory *contains*. Loading the
+base model had already populated that same snapshot directory with `model.safetensors`, so
+`iterdir()` returned it and `copy2` clobbered each freshly merged checkpoint with base weights —
+immediately after the merge had correctly written them. Filter by extension explicitly.
+
+The result was four byte-identical "merged" models, a full BFCL sweep in which every arm scored
+within noise of every other, and a tidy conclusion that was pure artifact. **The only thing that
+caught it was hashing the weights.** Every intermediate check passed: the merge itself worked
+(`max |Δ| = 0.00098`), `save_pretrained` preserved it, the adapters were non-trivial, and the
+per-category numbers even differed slightly between arms — which is exactly what fooled me, and
+turned out to be vLLM batching non-determinism at temperature 0.001. `verify_merged_differ` now
+runs before any sweep, because a one-line assertion is worth more than four plausible tables.
+
+The wreckage is kept in `results/bfcl_noise_floor/`. Scoring four identical models independently
+is a free measurement of BFCL's own run-to-run spread: **0.012–0.017**, the floor any claimed
+difference has to clear.
+
+**BFCL skips test cases that already have results.** After fixing the merge, the corrected sweep
+finished in 39 seconds and returned numbers identical to the broken run, because `bfcl generate`
+resumes rather than regenerates. The tell was the runtime, not the numbers — the numbers were
+*perfectly* consistent, which is precisely what a stale re-score looks like. Delete the result
+directory between runs.
+
+**Concurrency, not the GPU, was the throughput lever.** BFCL caps in-flight requests at
+`ThreadPoolExecutor(max_workers=num_threads)`, default 8. At that setting a 0.6B model on an A10
+took ~4s per request with the GPU essentially idle — 1.2 GB of weights against 600 GB/s of
+bandwidth. Raising it to 64 gave 2.3x for free. The bigger win was that arms are independent:
+running them as parallel Modal containers cut the eight-job sweep from over an hour to 24
+minutes at identical GPU-seconds. Moving to an H100 would have cost 3.6x/hour to buy a smaller
+speedup on a workload that was never compute-bound.
+
+**Version pinning inside the benchmark's own extra.** `bfcl-eval[oss-eval-vllm]` pins
+`vllm==0.8.5` but leaves `transformers` unconstrained, so pip resolves 5.15.1 and the server dies
+at startup on `all_special_tokens_extended`, removed in v5. `transformers==4.51.3` is the last
+4.x that still knows Qwen3. Relatedly, transformers 5.x and 4.51.3 do not round-trip a tokenizer:
+5.x writes `extra_special_tokens` as a list, 4.51.3 expects a dict and dies on `'list' object has
+no attribute 'keys'`. BFCL got its own Modal image for exactly this reason — the training image
+was a combination that took real effort to get working, and the worst outcome is no BFCL numbers
+*and* a broken pipeline.
+
 ## Running on a metered free tier
 
 **H100/A100/L40S all require a payment method**, so everything ran on an **A10**. That image

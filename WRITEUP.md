@@ -25,9 +25,18 @@ id leaked in the prompt — exploiting the fact that my reward scores final stat
 policy. The best *genuine* agent is SFT+RL at 30 steps, 0.797. Everything above it is
 artifact, and §3.3 explains why the failure was mine rather than the model's.
 
+**And on an external benchmark, none of it transfers.** BFCL over 2,340 test cases (§3.6, with
+predictions committed beforehand): no trained arm beats base on any category, and SFT is
+*catastrophic* — pooled AST accuracy 0.807 → 0.371, with parallel function calling collapsing to
+exactly **0 of 200**. The model learned to emit one tool call and stop, because both my SFT
+corpus and my environment are one-call-per-turn. RL-only, by contrast, preserves base capability
+(0.795), so on-policy RL turns out to be far more conservative than imitation. The 0.797 is a
+real gain in the environment it was trained for, bought with general capability that no
+in-domain metric could see.
+
 The through-line is that every headline number here was misleading in isolation, and what
 made the run interpretable was cheap instrumentation — per-episode records, an error taxonomy,
-and a compliance metric that moves opposite to success.
+a compliance metric that moves opposite to success, and finally a benchmark I did not write.
 
 ---
 
@@ -398,6 +407,96 @@ moved: "stopped early" 68.2% → 6.5%, "no tool call" 13.8% → 0%.
 
 ---
 
+### 3.6 BFCL: the external check, and what it cost the story
+
+Everything above is measured on an environment I wrote. BFCL is the uncontaminated test —
+fully offline, deterministic AST and state scoring, no judge, no overlap with
+`tau-retail-lite`. Four checkpoints were run over 2,340 test cases. Predictions were
+**committed before the run** (`BFCL_PREREGISTRATION.md`) so they could not be fitted afterwards.
+
+BFCL V4 `Overall` is deliberately not reported: 40% of its weight is agentic web search and
+long-session memory, which this pipeline never trained. A composite dominated by an untrained
+skill is uninformative in both directions.
+
+| | Base | + SFT | SFT+RL (30) | RL only (200) |
+|---|---|---|---|---|
+| `simple_python` (400) | 0.855 | 0.675 | 0.812 | 0.850 |
+| `multiple` (200) | 0.850 | 0.505 | 0.840 | 0.840 |
+| `parallel` (200) | 0.725 | **0.000** | **0.000** | 0.715 |
+| `parallel_multiple` (200) | 0.750 | **0.000** | **0.000** | 0.720 |
+| **AST pooled (1,000)** | **0.807** | **0.371** | **0.493** | **0.795** |
+| `multi_turn_base` (200) | 0.080 | 0.020 | 0.070 | 0.065 |
+
+**No trained arm beats base on anything.** The in-domain story was 0.132 → 0.797, a six-fold
+gain. Externally that gain is worth nothing, and the SFT arms are catastrophically worse.
+
+**SFT destroyed parallel calling outright, and RL did not bring it back.** 0 of 200, twice, in
+two independently trained arms. Per §3.4's own lesson, a number that stable across checkpoints
+is usually a property of the benchmark — so I read the failure records rather than assume. It is
+real, and the mechanism is exact. The syntax is perfect; the *count* is wrong:
+
+```
+error      : ["Wrong number of functions."]
+raw output : <tool_call>{"name": "spotify.play",
+                         "arguments": {"artist": "Taylor Swift", "duration": 20}}</tool_call>
+```
+
+The task asked for Taylor Swift *and* Maroon 5. Both my SFT corpus and my environment are
+strictly one-tool-call-per-turn, so the model learned to emit exactly one call and stop. Nothing
+in either stage ever rewarded a second call in the same turn, and a capability the base model
+had was trained out of it. **This is the clearest evidence in the project that narrow training
+data removes capabilities that no in-domain metric can see** — `tau-retail-lite` cannot even
+express the task that fails.
+
+**On-policy RL preserved general capability where imitation destroyed it.** RL-only sits at
+0.795 AST against base's 0.807 — statistically indistinguishable — despite training 200 steps in
+the same single-call environment that ruined the SFT arms. SFT saw 1,000 trajectories and lost
+0.436. The plausible mechanism is that on-policy RL can only reweight behaviour the policy
+already produces, so capability outside the training distribution is never pushed on, whereas
+imitation actively overwrites the output distribution toward the corpus. SFT+RL partially
+repairs the damage (0.371 → 0.493, `multiple` 0.505 → 0.840) but cannot recover what collapsed
+to zero.
+
+**The one axis that transfers cleanly is the act/abstain trade-off — and it confirms §3.1
+externally.** Splitting the relevance categories into "should not call" (1,124 cases) and
+"should call" (16) shows a single monotonic axis, not a competence difference:
+
+| | should NOT call | should call |
+|---|---|---|
+| Base | 0.801 | 0.625 |
+| + SFT | **0.903** | **0.375** |
+| SFT+RL (30) | 0.634 | 0.750 |
+| RL only (200) | 0.738 | **0.812** |
+
+SFT is the most abstemious model and the worst at acting when acting is correct; the RL arms are
+the reverse. That is exactly the in-domain diagnosis — SFT asks instead of acting, RL acts
+indiscriminately — reproduced on a benchmark I did not write. Note that the pooled "restraint"
+number is meaningless on its own: with 1,124 abstain cases against 16 call cases, a model that
+simply stopped calling functions would top the group while being useless. SFT scoring highest
+there is the artifact; the split is the finding.
+
+**P1, the load-bearing prediction, is unresolved.** §3.3 claims RL-only's in-domain lead is a
+reward hack, predicting it should lose to SFT+RL externally. Multi-turn: 14/200 against 13/200,
+p=0.84. The direction matches and the magnitude is one test case. **That is not support, and it
+is reported as unresolved rather than dressed up as confirmation.** The honest reading is that
+BFCL multi-turn at n=200 and ~6% accuracy has nowhere near the power to test it; resolving it
+needs all four multi-turn categories, roughly 8 GPU-hours.
+
+Of the four pre-registered predictions: **P2 confirmed** far more strongly than predicted (SFT
+damage is real, external, and catastrophic rather than marginal), **P3 confirmed** (all arms
+under 0.15 multi-turn), **P1 unresolved** for lack of power, and **P4 refuted** — I predicted the
+RL-only arms would show *weaker* restraint than SFT-initialised ones, and RL-only is in fact
+better at abstaining than SFT+RL (0.738 vs 0.634).
+
+**What this does to the headline.** 0.797 remains a real measurement of a real capability
+gain *in the environment it was trained for*. What BFCL establishes is that the gain is
+environment-specific, and that it was bought with general capability I did not know I was
+spending. A result reported as "SFT → RL took a 0.6B model from 0.13 to 0.80 on multi-turn tool
+use" would have been true and badly misleading. That is the single strongest argument in this
+project for running an external benchmark you did not write.
+
+---
+
 ## 4. Engineering findings
 
 Full list in [`ENGINEERING_NOTES.md`](ENGINEERING_NOTES.md); each was found by running the
@@ -440,10 +539,20 @@ changed the design:
 - **The headline benchmark is one I wrote.** Train and test share no database and one task
   family is held out of RL entirely, which controls for memorisation but not for the
   environment being easier, or differently shaped, than a real benchmark.
-- **BFCL was cut.** It was planned as the external, uncontaminated check and is genuinely
-  suitable (fully offline, deterministic, no judge). It was dropped when the A10 fallback
-  and the debugging above consumed the slack. Without it, nothing here demonstrates that
-  gains transfer off-distribution.
+- **The gains do not transfer, and BFCL now says so** (§3.6). No trained arm beats base on any
+  external category, and the SFT arms lose 0.436 AST accuracy — including parallel calling
+  falling to exactly zero. The in-domain result stands as a measurement of the environment it
+  was trained for and nothing wider.
+- **BFCL multi-turn was underpowered for the question it was run to answer.** One category,
+  200 cases, ~6% accuracy: the 95% interval is roughly ±3.3 points, so P1 needed a gap of five
+  points to register and got one test case. The four-category multi-turn suite (800 cases) was
+  priced at about 8 GPU-hours and not bought. The result is reported as unresolved.
+- **A merge bug silently invalidated the first BFCL sweep.** All four "merged" checkpoints were
+  byte-identical copies of base, so the first run scored the base model four times and produced
+  a tidy, entirely false "nothing transfers, all arms identical" conclusion. It was caught only
+  by hashing the weights (`verify_merged_differ`). The accident did leave something useful: four
+  identical models scored independently measures BFCL's own run-to-run spread at **0.012–0.017**,
+  which is the floor any claimed difference has to clear.
 - **RL is trained on the eval metric.** GRPO optimises the same grounded reward the harness
   scores. Disjoint seeds and a held-out family rule out memorising tasks, but not the
   objective and the metric being the same function. Base and SFT get no such advantage, so

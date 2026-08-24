@@ -1,0 +1,47 @@
+{
+  "id": "parallel_0",
+  "test_category": "parallel",
+  "error": [
+    "Wrong number of functions."
+  ],
+  "error_type": "parallel_function_checker_no_order:wrong_count",
+  "model_result_raw": "<tool_call>\n{\"name\": \"spotify.play\", \"arguments\": {\"artist\": \"Taylor Swift\", \"duration\": 20}}\n</tool_call>",
+  "model_result_decoded": [
+    {
+      "spotify.play": {
+        "artist": "Taylor Swift",
+        "duration": 20
+      }
+    }
+  ],
+  "possible_answer": [
+    {
+      "spotify.play": {
+        "artist": [
+          "Taylor Swift"
+        ],
+        "duration": [
+          20
+        ]
+      }
+    },
+    {
+      "spotify.play": {
+        "artist": [
+          "Maroon 5"
+        ],
+        "duration": [
+          15
+        ]
+      }
+    }
+  ],
+  "prompt_question": [
+    [
+      {
+        "role": "user",
+        "content": "Play songs from the artists Taylor Swift and Maroon 5, with a play time of 20 minutes and 15 minutes respectively, on Spotify."
+      }
+    ]
+  ]
+}

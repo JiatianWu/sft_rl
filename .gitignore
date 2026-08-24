@@ -10,3 +10,10 @@ data/sft_apigen.jsonl
 
 # Full transcripts are committed; per-episode records can get large but are kept
 # deliberately so results are auditable.
+
+# Raw BFCL output is 50 MB, because every failure record embeds its full prompt. The counts
+# the tables are built from live in `results/bfcl_summary.json`, which is committed, and
+# `scripts/bfcl_table.py` reproduces every number from it alone. One representative failure
+# record is kept in `results/bfcl_parallel_failure_example.json` as evidence for §3.6.
+results/bfcl/
+results/bfcl_noise_floor/

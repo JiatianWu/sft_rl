@@ -6,6 +6,8 @@ an environment with verifiable rewards, and evaluates all three checkpoints iden
 
 - **[PLAN.md](PLAN.md)** — the plan, written before any code.
 - **[WRITEUP.md](WRITEUP.md)** — results, reward design, trade-offs, and what failed.
+- **[BFCL_PREREGISTRATION.md](BFCL_PREREGISTRATION.md)** — external-benchmark predictions,
+  committed before the run, with the outcome appended.
 - **[ENGINEERING_NOTES.md](ENGINEERING_NOTES.md)** — the things that cost time.
 
 ## Results
@@ -36,6 +38,28 @@ fixed and pinned, and all six arms were then re-evaluated on the corrected metri
 Re-evaluating twice also gives real error bars: **±0.01 headline, ±0.05 per family**.
 [WRITEUP.md](WRITEUP.md) §3.4.
 
+### None of it transfers — BFCL
+
+The table above is measured on an environment I wrote. On BFCL (2,340 test cases, external,
+offline, deterministic; predictions committed beforehand in
+**[BFCL_PREREGISTRATION.md](BFCL_PREREGISTRATION.md)**):
+
+| | Base | + SFT | SFT+RL (30) | RL only (200) |
+|---|---|---|---|---|
+| **AST pooled** (1,000) | **0.807** | 0.371 | 0.493 | 0.795 |
+| `parallel` (200) | 0.725 | **0.000** | **0.000** | 0.715 |
+| `multi_turn_base` (200) | 0.080 | 0.020 | 0.070 | 0.065 |
+
+**No trained arm beats base on anything, and SFT is catastrophic.** Parallel function calling
+falls to *exactly zero*: the syntax stays valid, but the model emits one tool call where two are
+required, because both the SFT corpus and the environment are one-call-per-turn. A capability
+the base model had was trained out of it, and no in-domain metric could see it —
+`tau-retail-lite` cannot even express the failing task.
+
+**On-policy RL preserved what imitation destroyed** (0.795 vs base 0.807), despite training in
+the same single-call environment. The 0.797 is a real gain in the environment it was trained
+for, bought with general capability. [WRITEUP.md](WRITEUP.md) §3.6.
+
 ## The loop
 
 | Stage | What it does | Entry point |
@@ -64,6 +88,21 @@ costs one stage rather than the whole run.
 modal run modal_app.py::resume    # skip the base eval when results/ already has it
 modal run modal_app.py::smoke     # verify the stack before spending GPU time
 ```
+
+The external benchmark runs on a separate image, since `bfcl-eval` pins its own `vllm` and
+`transformers`. BFCL ignores LoRA adapters at request time, so checkpoints must be merged into
+full weights first — and `verify_merged_differ` is not optional, because a silent merge failure
+scores the base model N times and looks like a clean null result:
+
+```bash
+modal run modal_app.py::merge_adapters       # LoRA -> standalone models
+modal run modal_app.py::verify_merged_differ # assert the arms are actually different models
+modal run modal_app.py::bfcl_sweep --jobs "base:simple_python;sft:simple_python"
+python scripts/bfcl_table.py                 # per-category table, CIs, significance
+```
+
+`bfcl_sweep` fans the arms out across parallel containers, one GPU each: identical GPU-seconds,
+wall clock divided by the number of arms.
 
 Individual stages (`prepare`, `sft`, `grpo`, `evaluate`) remain callable for debugging.
 `TOOLUSE_GPU` selects the accelerator, defaulting to `A10` — the largest tier reachable on a

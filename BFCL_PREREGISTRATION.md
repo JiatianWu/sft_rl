@@ -67,3 +67,43 @@ Per-category numbers for all four arms, the smoke-test result even if it ends th
 and an explicit statement of which predictions survived. A prediction that fails is the most
 informative outcome available here, since it would mean a conclusion already in `WRITEUP.md`
 needs revising.
+
+---
+
+# Outcome
+
+Added after the run. Full numbers and discussion in `WRITEUP.md` §3.6; reproduce with
+`python scripts/bfcl_table.py`.
+
+| prediction | verdict |
+|---|---|
+| **P1** grpo > rl_only_long on multi-turn | **unresolved** — 14/200 vs 13/200, p=0.84 |
+| **P2** sft ≤ base on AST | **confirmed**, far more strongly than predicted |
+| **P3** multi-turn under 0.15 for all arms | **confirmed** — 0.020 to 0.080 |
+| **P4** RL-only shows weaker restraint than SFT-initialised | **refuted** |
+
+**P1 failed for lack of power, not because the evidence went the other way.** The direction
+matches the prediction and the magnitude is a single test case. One multi-turn category at
+n=200 and ~6% accuracy carries a ±3.3-point interval, so only a five-point gap would have
+registered. Calling this "consistent with the reward-hack account" would be reading noise;
+it is reported as unresolved. Resolving it needs all four multi-turn categories (~8 GPU-hours).
+
+**P2 confirmed on a scale I did not anticipate.** I predicted SFT would score "at or below" base
+on AST from tag corruption. Actual: pooled AST 0.807 → 0.371, with `parallel` and
+`parallel_multiple` at exactly 0.000. The mechanism was not corrupted tags at all — the syntax is
+valid and the *count* is wrong, one call emitted where two are required, because every
+trajectory it ever trained on had exactly one. A stronger result than predicted, for a different
+reason than predicted.
+
+**P4 refuted.** RL-only abstains *better* than SFT+RL (0.738 vs 0.634 on should-not-call), the
+opposite of the prediction drawn from `refuse_invalid` collapsing to 0.00 in-domain. In-domain
+restraint behaviour did not transfer as an ordering between arms.
+
+**The failure mode named in advance nearly happened, for a different reason.** The pre-registered
+worry was all-zero multi-turn scores. Instead the first complete sweep returned four
+*statistically identical* arms — because a merge bug had overwritten every checkpoint with base
+weights, so BFCL scored the base model four times. That would have produced a clean, quotable,
+entirely false "nothing transfers" result. It was caught by hashing the merged weights rather
+than by anything in the numbers, which looked perfectly reasonable. The discarded sweep is kept
+in `results/bfcl_noise_floor/`: four byte-identical models scored independently, which measures
+BFCL's run-to-run spread at 0.012–0.017 and sets the floor any claimed difference must clear.

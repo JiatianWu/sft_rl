@@ -1,0 +1,278 @@
+{
+  "bfcl": {
+    "base": {
+      "irrelevance": [
+        197,
+        240
+      ],
+      "live_irrelevance": [
+        703,
+        884
+      ],
+      "live_relevance": [
+        10,
+        16
+      ],
+      "multi_turn_base": [
+        16,
+        200
+      ],
+      "multiple": [
+        170,
+        200
+      ],
+      "parallel": [
+        145,
+        200
+      ],
+      "parallel_multiple": [
+        150,
+        200
+      ],
+      "simple_python": [
+        342,
+        400
+      ]
+    },
+    "grpo": {
+      "irrelevance": [
+        142,
+        240
+      ],
+      "live_irrelevance": [
+        571,
+        884
+      ],
+      "live_relevance": [
+        12,
+        16
+      ],
+      "multi_turn_base": [
+        14,
+        200
+      ],
+      "multiple": [
+        168,
+        200
+      ],
+      "parallel": [
+        0,
+        200
+      ],
+      "parallel_multiple": [
+        0,
+        200
+      ],
+      "simple_python": [
+        325,
+        400
+      ]
+    },
+    "rl_only_long": {
+      "irrelevance": [
+        191,
+        240
+      ],
+      "live_irrelevance": [
+        639,
+        884
+      ],
+      "live_relevance": [
+        13,
+        16
+      ],
+      "multi_turn_base": [
+        13,
+        200
+      ],
+      "multiple": [
+        168,
+        200
+      ],
+      "parallel": [
+        143,
+        200
+      ],
+      "parallel_multiple": [
+        144,
+        200
+      ],
+      "simple_python": [
+        340,
+        400
+      ]
+    },
+    "sft": {
+      "irrelevance": [
+        219,
+        240
+      ],
+      "live_irrelevance": [
+        796,
+        884
+      ],
+      "live_relevance": [
+        6,
+        16
+      ],
+      "multi_turn_base": [
+        4,
+        200
+      ],
+      "multiple": [
+        101,
+        200
+      ],
+      "parallel": [
+        0,
+        200
+      ],
+      "parallel_multiple": [
+        0,
+        200
+      ],
+      "simple_python": [
+        270,
+        400
+      ]
+    }
+  },
+  "bfcl_noise_floor": {
+    "base": {
+      "irrelevance": [
+        196,
+        240
+      ],
+      "live_irrelevance": [
+        710,
+        884
+      ],
+      "live_relevance": [
+        12,
+        16
+      ],
+      "multi_turn_base": [
+        9,
+        200
+      ],
+      "multiple": [
+        170,
+        200
+      ],
+      "parallel": [
+        140,
+        200
+      ],
+      "parallel_multiple": [
+        143,
+        200
+      ],
+      "simple_python": [
+        346,
+        400
+      ]
+    },
+    "grpo": {
+      "irrelevance": [
+        205,
+        240
+      ],
+      "live_irrelevance": [
+        711,
+        884
+      ],
+      "live_relevance": [
+        11,
+        16
+      ],
+      "multi_turn_base": [
+        12,
+        200
+      ],
+      "multiple": [
+        167,
+        200
+      ],
+      "parallel": [
+        144,
+        200
+      ],
+      "parallel_multiple": [
+        137,
+        200
+      ],
+      "simple_python": [
+        344,
+        400
+      ]
+    },
+    "rl_only_long": {
+      "irrelevance": [
+        202,
+        240
+      ],
+      "live_irrelevance": [
+        709,
+        884
+      ],
+      "live_relevance": [
+        11,
+        16
+      ],
+      "multi_turn_base": [
+        10,
+        200
+      ],
+      "multiple": [
+        170,
+        200
+      ],
+      "parallel": [
+        148,
+        200
+      ],
+      "parallel_multiple": [
+        145,
+        200
+      ],
+      "simple_python": [
+        341,
+        400
+      ]
+    },
+    "sft": {
+      "irrelevance": [
+        199,
+        240
+      ],
+      "live_irrelevance": [
+        699,
+        884
+      ],
+      "live_relevance": [
+        10,
+        16
+      ],
+      "multi_turn_base": [
+        11,
+        200
+      ],
+      "multiple": [
+        170,
+        200
+      ],
+      "parallel": [
+        142,
+        200
+      ],
+      "parallel_multiple": [
+        143,
+        200
+      ],
+      "simple_python": [
+        346,
+        400
+      ]
+    }
+  }
+}

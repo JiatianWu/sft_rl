@@ -57,6 +57,32 @@ image = (
     .add_local_python_source("tooluse")
 )
 
+# BFCL gets its own image on purpose. `bfcl-eval` pulls its own transformers/vllm, and the
+# training image above is a combination that took real work to get running on an A10. The worst
+# outcome of sharing one image is no BFCL numbers *and* a broken pipeline.
+bfcl_image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .apt_install("git")
+    .pip_install(
+        "bfcl-eval[oss-eval-vllm]",
+        # The extra pins `vllm==0.8.5` but leaves `transformers` free, so pip resolves 5.15.1
+        # and the server dies at startup: vllm 0.8.5 reads `all_special_tokens_extended`, which
+        # transformers v5 removed. 4.51.3 is the last-4.x line that still knows Qwen3.
+        "transformers==4.51.3",
+        # qwen_agent (imported by BFCL's Qwen handler) needs this and does not declare it;
+        # without it `bfcl models` dies on `ModuleNotFoundError: No module named 'soundfile'`.
+        "soundfile",
+        "peft==0.20.0",
+    )
+    .env(
+        {
+            "HF_HOME": "/cache/hf",
+            "TOKENIZERS_PARALLELISM": "false",
+            "VLLM_USE_FLASHINFER_SAMPLER": "0",
+        }
+    )
+)
+
 app = modal.App(APP_NAME, image=image)
 
 cache = modal.Volume.from_name("tooluse-cache", create_if_missing=True)
@@ -366,6 +392,246 @@ def rl_arm(
     )
     workspace.commit()
     print(f"[{tag}] done", flush=True)
+
+
+BFCL_ARMS = {
+    "base": None,
+    "sft": "/work/checkpoints/sft",
+    "grpo": "/work/checkpoints/grpo",
+    "rl_only_long": "/work/checkpoints/rl_only_long",
+}
+
+
+@app.function(volumes=VOLUMES, timeout=1 * HOURS)
+def merge_adapters() -> None:
+    """Merge each LoRA adapter into full base weights for BFCL.
+
+    BFCL's `--lora-modules` flag does not do what its README implies. It is forwarded to
+    `vllm serve`, which registers the adapter, but every request BFCL then sends names the
+    *base* model:
+
+        api_response = self.client.completions.create(
+            model=self.model_path_or_id,   # always the base path, never a LoRA name
+
+    So the adapter is loaded and never applied. Running the sweep that way would have produced
+    four identical copies of the base numbers and a confident "nothing transfers" conclusion,
+    which is a worse outcome than getting no numbers at all. Merging sidesteps it entirely:
+    each arm becomes a standalone model directory that needs no adapter machinery.
+    """
+    import shutil
+    from pathlib import Path
+
+    import torch
+    from huggingface_hub import snapshot_download
+    from peft import PeftModel
+    from transformers import AutoModelForCausalLM
+
+    base_id = "Qwen/Qwen3-0.6B"
+
+    # Copy the hub's own config and tokenizer files rather than re-serialising them. This image
+    # runs transformers 5.15.1 and BFCL runs 4.51.3, and the two do not round-trip: 5.x writes
+    # `extra_special_tokens` as a list, 4.51.3 expects a dict, and loading dies on
+    # `'list' object has no attribute 'keys'`. Nothing here modifies the tokenizer, so the
+    # upstream files are both correct and version-neutral.
+    # Filter by extension explicitly. `allow_patterns` governs what `snapshot_download` *fetches*,
+    # not what the snapshot directory contains — loading the base model above already populated
+    # it with `model.safetensors`. Copying everything therefore overwrote each freshly merged
+    # checkpoint with base weights, and produced four byte-identical "merged" models that BFCL
+    # then scored as four indistinguishable arms.
+    hub = Path(snapshot_download(base_id, allow_patterns=["*.json", "*.txt", "*.jinja"]))
+    sidecars = [
+        p
+        for p in hub.iterdir()
+        if p.is_file() and p.suffix in {".json", ".txt", ".jinja"} and "safetensors" not in p.name
+    ]
+    print(f"[merge] sidecars: {sorted(p.name for p in sidecars)}", flush=True)
+
+    for tag, adapter in BFCL_ARMS.items():
+        target = Path(f"/work/merged/{tag}")
+        print(f"\n[merge] {tag} <- {adapter or 'base weights'}", flush=True)
+        model = AutoModelForCausalLM.from_pretrained(base_id, dtype=torch.bfloat16)
+        if adapter:
+            model = PeftModel.from_pretrained(model, adapter).merge_and_unload()
+        model.save_pretrained(target)
+        for path in sidecars:
+            shutil.copy2(path, target / path.name)
+        workspace.commit()
+        print(f"[merge] wrote {target}", flush=True)
+
+
+@app.function(image=bfcl_image, volumes=VOLUMES, timeout=10 * 60)
+def bfcl_probe() -> None:
+    """CPU-only check that the merged checkpoints load under BFCL's pinned stack.
+
+    The merged weights were written by transformers 5.15.1 and BFCL's vllm extra forces 4.51.3,
+    so config and chat-template compatibility across that gap is worth proving for free rather
+    than discovering partway into a paid GPU run.
+    """
+    from pathlib import Path
+
+    import transformers
+    import vllm
+    from transformers import AutoConfig, AutoTokenizer
+
+    print(f"vllm {vllm.__version__} | transformers {transformers.__version__}", flush=True)
+    print("files:", sorted(p.name for p in Path("/work/merged/base").iterdir()), flush=True)
+    config = AutoConfig.from_pretrained("/work/merged/base")
+    tokenizer = AutoTokenizer.from_pretrained("/work/merged/base")
+    print(f"config ok: {config.model_type} | tokenizer ok: {type(tokenizer).__name__}", flush=True)
+    print(f"chat template present: {tokenizer.chat_template is not None}", flush=True)
+    rendered = tokenizer.apply_chat_template(
+        [{"role": "user", "content": "hi"}],
+        tools=[{"type": "function", "function": {"name": "f", "description": "d", "parameters": {}}}],
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    print(f"renders tools: {'<tools>' in rendered or 'f' in rendered}", flush=True)
+
+
+@app.function(volumes=VOLUMES, timeout=30 * 60)
+def diagnose_merge() -> None:
+    """Find out why merging the SFT adapter changes no weights."""
+    import torch
+    from peft import PeftModel
+    from safetensors.torch import load_file
+    from transformers import AutoModelForCausalLM
+
+    workspace.reload()
+    adapter_weights = load_file("/work/checkpoints/sft/adapter_model.safetensors")
+    print(f"[diag] adapter tensors: {len(adapter_weights)}", flush=True)
+    for name in list(adapter_weights)[:4]:
+        tensor = adapter_weights[name]
+        print(f"[diag]   {name} {tuple(tensor.shape)} absmax={tensor.abs().max():.4g}", flush=True)
+    lora_b = [v for k, v in adapter_weights.items() if "lora_B" in k]
+    print(f"[diag] lora_B tensors: {len(lora_b)}, all zero: {all(t.abs().max() == 0 for t in lora_b)}")
+
+    model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B", dtype=torch.bfloat16)
+    probe = "model.layers.0.self_attn.q_proj.weight"
+    before = dict(model.named_parameters())[probe].detach().clone()
+
+    peft_model = PeftModel.from_pretrained(model, "/work/checkpoints/sft")
+    active = [n for n, _ in peft_model.named_modules() if "lora_A" in n]
+    print(f"[diag] lora modules attached: {len(active)}", flush=True)
+
+    merged = peft_model.merge_and_unload()
+    after = dict(merged.named_parameters())[probe].detach()
+    delta = (after.float() - before.float()).abs().max().item()
+    print(f"[diag] max |Δ| on {probe}: {delta:.6g}", flush=True)
+    print(f"[diag] merge {'WORKED' if delta > 0 else 'was a NO-OP'}", flush=True)
+
+    # Does the change survive save_pretrained? Written to /tmp, i.e. container-local disk, so
+    # this separates "save drops the merge" from "the volume did not receive the write".
+    merged.save_pretrained("/tmp/merge_test")
+    reloaded = load_file("/tmp/merge_test/model.safetensors")[probe]
+    saved_delta = (reloaded.float() - before.float()).abs().max().item()
+    print(f"[diag] max |Δ| after save->reload: {saved_delta:.6g}", flush=True)
+    print(f"[diag] save {'PRESERVED the merge' if saved_delta > 0 else 'DROPPED the merge'}", flush=True)
+
+    on_volume = load_file("/work/merged/sft/model.safetensors")[probe]
+    volume_delta = (on_volume.float() - before.float()).abs().max().item()
+    print(f"[diag] max |Δ| of /work/merged/sft vs base: {volume_delta:.6g}", flush=True)
+
+
+@app.function(volumes=VOLUMES, timeout=20 * 60)
+def verify_merged_differ() -> None:
+    """Prove the four merged checkpoints are actually different models.
+
+    BFCL reports every arm as statistically identical to base, and the boring explanation for
+    that is a silent merge failure producing four copies of the base weights. Since that would
+    invalidate the conclusion rather than support it, it gets checked rather than assumed.
+    """
+    import hashlib
+    from pathlib import Path
+
+    workspace.reload()
+    digests = {}
+    for tag in BFCL_ARMS:
+        data = (Path(f"/work/merged/{tag}") / "model.safetensors").read_bytes()
+        digests[tag] = hashlib.sha256(data).hexdigest()[:16]
+        print(f"[verify] {tag}: {digests[tag]}", flush=True)
+    unique = len(set(digests.values()))
+    print(f"[verify] {unique}/{len(digests)} distinct — {'OK' if unique == len(digests) else 'MERGE FAILED'}")
+
+
+@app.function(gpu=GPU, image=bfcl_image, volumes=VOLUMES, timeout=3 * HOURS)
+def bfcl(arms: str = "base", categories: str = "simple_python", threads: int = 64) -> dict:
+    """Run BFCL on one merged checkpoint. Predictions are pre-registered in BFCL_PREREGISTRATION.md.
+
+    `simple_python` is the smoke category: single-turn and cheap, and if a checkpoint cannot
+    register above zero there, the expensive multi-turn categories will be uniformly zero and
+    the comparison this experiment exists to make is unmeasurable.
+
+    `threads` is the only throughput knob that matters here, because BFCL caps in-flight
+    requests at exactly this value (`ThreadPoolExecutor(max_workers=num_threads)`). At the
+    default 8, a request took ~4s and the A10 sat idle: Qwen3-0.6B is 1.2 GB of weights against
+    600 GB/s of bandwidth, so decode is nowhere near saturated and ~19 GB is left for KV cache.
+    Raising this is free, whereas a larger GPU costs 3.6x (H100) to buy back only per-token
+    latency — the wrong lever for a workload that is latency-bound at low concurrency.
+    """
+    import json
+    import subprocess
+    from pathlib import Path
+
+    tag = arms
+    merged = f"/work/merged/{tag}"
+    if not Path(merged).exists():
+        raise RuntimeError(f"{merged} missing — run merge_adapters first")
+    print(f"\n{'=' * 70}\n[bfcl] {tag}: {categories}\n{'=' * 70}", flush=True)
+    subprocess.run(
+        [
+            "bfcl", "generate",
+            "--model", "Qwen/Qwen3-0.6B-FC",
+            "--test-category", categories,
+            "--backend", "vllm",
+            "--local-model-path", merged,
+            "--num-gpus", "1",
+            "--gpu-memory-utilization", "0.85",
+            "--num-threads", str(threads),
+            "--result-dir", f"/work/bfcl/{tag}/result",
+        ],
+        check=True,
+    )
+    workspace.commit()
+    subprocess.run(
+        [
+            "bfcl", "evaluate",
+            "--model", "Qwen/Qwen3-0.6B-FC",
+            "--test-category", categories,
+            "--result-dir", f"/work/bfcl/{tag}/result",
+            "--score-dir", f"/work/bfcl/{tag}/score",
+        ],
+        check=True,
+    )
+    workspace.commit()
+    # Score files are JSONL whose *first* line is the summary and whose remaining lines are
+    # individual failures, so they must be read line-wise rather than with `json.load`.
+    scores = {}
+    for path in sorted(Path(f"/work/bfcl/{tag}/score").rglob("*.json")):
+        head = json.loads(path.read_text().splitlines()[0])
+        name = path.stem.replace("BFCL_v4_", "").replace("_score", "")
+        scores[name] = head
+        print(f"[bfcl] SCORE {tag} {name}: {json.dumps(head)}", flush=True)
+    print(f"[bfcl] {tag} done", flush=True)
+    return {"tag": tag, "scores": scores}
+
+
+@app.local_entrypoint()
+def bfcl_sweep(jobs: str = "", threads: int = 64) -> None:
+    """Fan the sweep out across containers, one arm per GPU.
+
+    The arms are completely independent, so running them in parallel costs the same GPU-seconds
+    and divides wall clock by the number of arms. That is a strictly better trade than moving to
+    a larger GPU, which would cost 3.6x per hour (H100 vs A10) to buy a much smaller speedup on
+    a workload that is not compute-bound.
+
+    `jobs` is a semicolon-separated list of `tag:categories`, so finished work is not repeated.
+    """
+    import json
+
+    specs = [job.split(":", 1) for job in jobs.split(";") if job.strip()]
+    print(f"[sweep] {len(specs)} containers in parallel", flush=True)
+    for result in bfcl.starmap([(tag, categories, threads) for tag, categories in specs]):
+        print(f"[sweep] {result['tag']}: {json.dumps(result['scores'])}", flush=True)
 
 
 @app.function(volumes=VOLUMES, timeout=1 * HOURS)
