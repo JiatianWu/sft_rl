@@ -430,6 +430,12 @@ skill is uninformative in both directions.
 **No trained arm beats base on anything.** The in-domain story was 0.132 → 0.797, a six-fold
 gain. Externally that gain is worth nothing, and the SFT arms are catastrophically worse.
 
+Worth being precise about what "off-distribution" means here, because the two stages use
+different data but not different domains. SFT is APIGen-MT-5k, RL is `tau-retail-lite`, and the
+former was chosen *for* its domain overlap with the latter — both are tau-bench retail/airline
+back-office work. Nothing in this pipeline ever trained on diverse tools, so BFCL is testing
+transfer out of a single narrow domain family, not merely out of one environment.
+
 **SFT destroyed parallel calling outright, and RL did not bring it back.** 0 of 200, twice, in
 two independently trained arms. Per §3.4's own lesson, a number that stable across checkpoints
 is usually a property of the benchmark — so I read the failure records rather than assume. It is
@@ -441,10 +447,14 @@ raw output : <tool_call>{"name": "spotify.play",
                          "arguments": {"artist": "Taylor Swift", "duration": 20}}</tool_call>
 ```
 
-The task asked for Taylor Swift *and* Maroon 5. Both my SFT corpus and my environment are
-strictly one-tool-call-per-turn, so the model learned to emit exactly one call and stop. Nothing
-in either stage ever rewarded a second call in the same turn, and a capability the base model
-had was trained out of it. **This is the clearest evidence in the project that narrow training
+The task asked for Taylor Swift *and* Maroon 5. **The model was never shown a single example of
+two calls in one turn.** Across the SFT corpus there are 16,732 assistant messages containing
+tool calls and *none* of them holds more than one — and that is structural rather than
+incidental, since `prepare_sft.py` maps each ShareGPT `function_call` turn onto its own assistant
+message, so `tool_calls` is always a one-element list. `tau-retail-lite` is one-call-per-turn
+too. So neither stage ever demonstrated or rewarded a second call in the same turn, the model
+learned "emit one call and stop" as a hard rule, and a capability the base model had was trained
+out of it. **This is the clearest evidence in the project that narrow training
 data removes capabilities that no in-domain metric can see** — `tau-retail-lite` cannot even
 express the task that fails.
 
