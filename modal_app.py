@@ -93,13 +93,23 @@ HOURS = 60 * 60
 
 
 @app.function(volumes=VOLUMES, timeout=1 * HOURS)
-def prepare() -> None:
-    """Download and convert the SFT dataset into the shared volume."""
+def prepare(apigen: int = 0, hermes: int = 0, out: str = "/work/data/sft_apigen.jsonl") -> None:
+    """Download and convert the SFT dataset into the shared volume.
+
+    `hermes > 0` mixes in NousResearch/hermes-function-calling-v1, whose assistant turns make
+    several calls at once — the one thing APIGen-MT and `tau-retail-lite` never demonstrate, and
+    the reason BFCL scored the SFT arms 0/200 on parallel calling (WRITEUP.md §3.6).
+    """
     from pathlib import Path
 
     from tooluse.data.prepare_sft import build
 
-    build(limit=None, out_path=Path("/work/data/sft_apigen.jsonl"), cache=Path("/cache/apigen-mt_5k.json"))
+    build(
+        limit=apigen or None,
+        out_path=Path(out),
+        cache=Path("/cache/apigen-mt_5k.json"),
+        hermes=hermes,
+    )
     workspace.commit()
 
 
@@ -399,6 +409,7 @@ BFCL_ARMS = {
     "sft": "/work/checkpoints/sft",
     "grpo": "/work/checkpoints/grpo",
     "rl_only_long": "/work/checkpoints/rl_only_long",
+    "sft_mixed": "/work/checkpoints/sft_mixed",
 }
 
 
@@ -447,6 +458,9 @@ def merge_adapters() -> None:
     print(f"[merge] sidecars: {sorted(p.name for p in sidecars)}", flush=True)
 
     for tag, adapter in BFCL_ARMS.items():
+        if adapter and not Path(adapter).exists():
+            print(f"[merge] {tag}: no adapter at {adapter}, skipping", flush=True)
+            continue
         target = Path(f"/work/merged/{tag}")
         print(f"\n[merge] {tag} <- {adapter or 'base weights'}", flush=True)
         model = AutoModelForCausalLM.from_pretrained(base_id, dtype=torch.bfloat16)
@@ -486,6 +500,57 @@ def bfcl_probe() -> None:
         add_generation_prompt=True,
     )
     print(f"renders tools: {'<tools>' in rendered or 'f' in rendered}", flush=True)
+
+
+@app.function(gpu=GPU, volumes=VOLUMES, timeout=5 * HOURS)
+def mixed_arm(apigen: int = 500, hermes: int = 500, n_seeds: int = 100, trials: int = 4) -> None:
+    """SFT on a corpus that actually contains parallel calls, then evaluate in-domain.
+
+    Tests one hypothesis: BFCL `parallel` collapsing to 0/200 is caused by the *absence* of
+    multi-call examples, not by capacity loss or general forgetting. Total trajectories are held
+    at 1,000 to match the existing `sft` arm, so the only variable is composition.
+
+    The in-domain eval is here because the mix halves the APIGen share, and APIGen is what makes
+    SFT valuable as an RL prior (+0.301, §3.1). Buying parallel calling by destroying the prior
+    would be a bad trade, and only measuring both shows it.
+    """
+    import subprocess
+
+    def stage(name: str, command: list[str]) -> None:
+        print(f"\n{'=' * 70}\n[mixed] {name}\n{'=' * 70}", flush=True)
+        subprocess.run(command, check=True)
+        workspace.commit()
+        print(f"[mixed] {name} committed", flush=True)
+
+    stage(
+        "1/3 build mixed corpus",
+        [
+            "python", "-m", "tooluse.data.prepare_sft",
+            "--limit", str(apigen),
+            "--hermes", str(hermes),
+            "--out", "/work/data/sft_mixed.jsonl",
+            "--cache", "/cache/apigen-mt_5k.json",
+        ],
+    )
+    stage(
+        "2/3 SFT",
+        [
+            "python", "-m", "tooluse.train.sft",
+            "--data", "/work/data/sft_mixed.jsonl",
+            "--output", "/work/checkpoints/sft_mixed",
+            "--limit", str(apigen + hermes),
+            "--max-length", "8192",
+        ],
+    )
+    stage(
+        "3/3 eval in-domain",
+        [
+            "python", "-m", "tooluse.eval.run_eval",
+            "--tag", "sft_mixed", "--adapter", "/work/checkpoints/sft_mixed",
+            "--n-seeds", str(n_seeds), "--trials", str(trials), "--out", "/work/results",
+        ],
+    )
+    print("\n[mixed] done — run merge_adapters then bfcl_sweep for the external numbers", flush=True)
 
 
 @app.function(volumes=VOLUMES, timeout=30 * 60)
@@ -546,8 +611,11 @@ def verify_merged_differ() -> None:
     workspace.reload()
     digests = {}
     for tag in BFCL_ARMS:
-        data = (Path(f"/work/merged/{tag}") / "model.safetensors").read_bytes()
-        digests[tag] = hashlib.sha256(data).hexdigest()[:16]
+        weights = Path(f"/work/merged/{tag}") / "model.safetensors"
+        if not weights.exists():
+            print(f"[verify] {tag}: not merged, skipping", flush=True)
+            continue
+        digests[tag] = hashlib.sha256(weights.read_bytes()).hexdigest()[:16]
         print(f"[verify] {tag}: {digests[tag]}", flush=True)
     unique = len(set(digests.values()))
     print(f"[verify] {unique}/{len(digests)} distinct — {'OK' if unique == len(digests) else 'MERGE FAILED'}")

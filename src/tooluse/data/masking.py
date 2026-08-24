@@ -58,6 +58,31 @@ def render_prefix(tokenizer, messages: list[dict[str, Any]], tools: list[dict[st
     return text[:marker]
 
 
+def _segment_ends(messages: list[dict[str, Any]]) -> list[int]:
+    """Indices to render at, treating a run of consecutive tool messages as one unit.
+
+    Qwen3's template merges consecutive tool messages into a *single* user turn, so rendering
+    after each one is not append-only: with one response the block closes with
+    `</tool_response><|im_end|>`, and adding the second reopens it. The incremental diff then
+    fails its prefix check and `build_example` discards the trajectory.
+
+    That only bites when an assistant turn makes several calls at once, which no single-call
+    corpus contains — so this went unnoticed until Hermes was mixed in, where it silently
+    dropped *all* 284 parallel trajectories, i.e. exactly the examples the mix exists to add.
+
+    Emitting the run as one segment is safe rather than merely convenient: every message in it
+    is a tool response, so the whole span is masked either way and per-message granularity buys
+    nothing.
+    """
+    ends = []
+    for index, message in enumerate(messages):
+        following = messages[index + 1] if index + 1 < len(messages) else None
+        if message["role"] == "tool" and following is not None and following["role"] == "tool":
+            continue
+        ends.append(index)
+    return ends
+
+
 def build_example(
     tokenizer,
     messages: list[dict[str, Any]],
@@ -73,7 +98,7 @@ def build_example(
     labels: list[int] = []
     previous = ""
 
-    for index in range(len(messages)):
+    for index in _segment_ends(messages):
         current = render_prefix(tokenizer, messages[: index + 1], tools)
         if not current.startswith(previous):
             return None  # rendering was not append-only; refuse to guess at the mask

@@ -70,6 +70,47 @@ needs revising.
 
 ---
 
+# Follow-up: does mixing in parallel-call data repair `parallel`?
+
+Pre-registered before training the `sft_mixed` arm, same rules as above.
+
+§3.6 attributes `parallel` scoring exactly 0/200 to a specific, narrow cause: neither training
+stage ever showed the model two calls in one turn (16,732 tool-calling messages in the SFT
+corpus, none with more than one). The competing explanation is duller and more worrying — that
+LoRA SFT at this scale degrades the model broadly, and parallel calling is simply the most
+fragile thing to break first.
+
+Those predict different things, so the corpus was changed and nothing else.
+
+**The intervention.** `sft_mixed` trains on 500 APIGen-MT trajectories plus 500 from
+NousResearch/hermes-function-calling-v1, which supplies what APIGen lacks: 56.8% of its
+tool-calling turns carry more than one call, across 35 domains. Total trajectories stay at
+1,000 to match the existing `sft` arm, so composition is the only variable. xLAM was the first
+choice and is gated (`gated=auto`, needs a token); ToolACE is ungated but encodes calls as a
+bracketed DSL with spaces in function names, needing a bespoke parser. Hermes needs neither.
+
+**P5 — `sft_mixed` scores materially above zero on `parallel` and `parallel_multiple`.** Any
+clearly non-zero result confirms absence-of-examples over general degradation. I expect it to
+land below base (0.725/0.750) rather than at it, since only 12.9% of the mixed corpus's
+tool-calling turns are multi-call.
+
+*Refuted if* it stays at or near zero, which would mean the damage is broad rather than
+specific and §3.6's explanation is wrong.
+
+**P6 — pooled AST recovers well above `sft`'s 0.371**, since two of its four categories were
+pinned at zero. Weak, and stated mainly so a rise cannot be presented as a surprise.
+
+**P7 — in-domain `pass^1` stays poor, in the 0.03–0.15 band.** The mix does nothing about the
+actual in-domain failure (asking a user simulator that does not exist), and halves the APIGen
+data. The real question this leaves open is whether SFT still works as an RL prior, which needs
+a GRPO run from `sft_mixed` and is not part of this step.
+
+**What would make this uninformative.** If `sft_mixed` is broadly worse than `sft` everywhere,
+the comparison is confounded by having half the APIGen data rather than by the added parallel
+examples, and no clean claim is available either way.
+
+---
+
 # Outcome
 
 Added after the run. Full numbers and discussion in `WRITEUP.md` §3.6; reproduce with
