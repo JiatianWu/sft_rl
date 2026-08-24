@@ -17,6 +17,7 @@ TAGS = [
     ("sft", "+ SFT"),
     ("rl_only", "GRPO only"),
     ("grpo", "+ SFT + GRPO"),
+    ("rl_only_long", "GRPO only (long)"),
     ("grpo_long", "+ SFT + GRPO (long)"),
 ]
 
@@ -31,7 +32,32 @@ HEADLINE = [
     ("called_any_tool", "used a tool", "{:.2f}"),
     ("n_illegal_writes", "illegal writes", "{:.3f}"),
     ("n_malformed", "malformed", "{:.3f}"),
+    ("lookup_compliance", "looked up before write", "{:.3f}"),
 ]
+
+
+# Families whose oracle is a single write. Solving one *correctly* still requires looking the
+# user up first, because the policy says so — but the reward never checks that, so the metric
+# below has to.
+WRITE_FAMILIES = {"cancel_order", "modify_address", "return_items", "exchange_items"}
+
+
+def lookup_compliance(results_dir: Path, tag: str) -> float | None:
+    """Fraction of single-write tasks where the model did anything before firing the write.
+
+    This exists because success and compliance came apart. A checkpoint that skips
+    `find_user_id_by_email` and calls the write directly with the id leaked in the prompt
+    scores a *perfect* grounded reward while violating the first line of the policy. Success
+    rising while this falls is the signature of that hack, and neither number shows it alone.
+    """
+    path = results_dir / f"{tag}_episodes.jsonl"
+    if not path.exists():
+        return None
+    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    writes = [r for r in rows if r["family"] in WRITE_FAMILIES]
+    if not writes:
+        return None
+    return sum(1 for r in writes if r["scores"]["n_calls"] > 1) / len(writes)
 
 
 def load(results_dir: Path) -> dict[str, dict]:
@@ -39,7 +65,11 @@ def load(results_dir: Path) -> dict[str, dict]:
     for tag, _ in TAGS:
         path = results_dir / f"{tag}_summary.json"
         if path.exists():
-            summaries[tag] = json.loads(path.read_text())
+            summary = json.loads(path.read_text())
+            compliance = lookup_compliance(results_dir, tag)
+            if compliance is not None:
+                summary["lookup_compliance"] = compliance
+            summaries[tag] = summary
     return summaries
 
 

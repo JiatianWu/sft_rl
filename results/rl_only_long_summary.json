@@ -1,0 +1,33 @@
+{
+  "pass^1": 0.9345833333333333,
+  "pass^2": 0.9322222222222223,
+  "pass^3": 0.9316666666666666,
+  "pass^4": 0.9316666666666666,
+  "r_action": 0.94625,
+  "r_output": 0.96875,
+  "r_outcome": 0.9345833333333333,
+  "r_progress": 0.94625,
+  "n_calls": 1.16875,
+  "n_redundant": 0.03333333333333333,
+  "n_failed": 0.24458333333333335,
+  "n_illegal_writes": 0.22125,
+  "n_malformed": 0.0,
+  "n_unknown_tool": 0.0,
+  "called_any_tool": 0.9941666666666666,
+  "reward": 1.1406458333333334,
+  "per_family_success": {
+    "cancel_order": 1.0,
+    "modify_address": 1.0,
+    "return_items": 0.93,
+    "exchange_items": 0.865,
+    "lookup_and_report": 1.0,
+    "refuse_invalid": 0.8125
+  },
+  "n_episodes": 2400,
+  "n_tasks": 600,
+  "tag": "rl_only_long",
+  "adapter": "/work/checkpoints/rl_only_long",
+  "trials": 4,
+  "temperature": 0.7,
+  "elapsed_s": 250.0
+}

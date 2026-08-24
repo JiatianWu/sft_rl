@@ -23,6 +23,7 @@ TAGS = [
     ("sft", "+ SFT"),
     ("rl_only", "GRPO only"),
     ("grpo", "+ SFT + GRPO"),
+    ("rl_only_long", "GRPO only (long)"),
     ("grpo_long", "+ SFT + GRPO (long)"),
 ]
 

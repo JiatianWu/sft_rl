@@ -10,20 +10,26 @@ an environment with verifiable rewards, and evaluates all three checkpoints iden
 
 ## Results
 
-Task success on 2,400 held-out episodes per checkpoint, identical decoding throughout:
+Task success on 2,400 held-out episodes per checkpoint, identical decoding throughout.
+"30"/"200" are GRPO steps; RL-only arms train a fresh LoRA from the same config SFT uses.
 
-| | Base | + SFT | + SFT + GRPO |
-|---|---|---|---|
-| **pass^1** | 0.140 | 0.037 | **0.794** |
-| used a tool at all | 0.86 | 0.50 | 1.00 |
-| tool calls / episode | 1.12 | 1.33 | 3.51 |
-| illegal writes / episode | 0.050 | 0.002 | 0.171 |
+| | Base | + SFT | RL only (30) | SFT+RL (30) | RL only (200) | SFT+RL (200) |
+|---|---|---|---|---|---|---|
+| **pass^1** | 0.140 | 0.037 | 0.489 | **0.794** | *0.935* | 0.863 |
+| **looked up before writing** | 0.13 | 0.42 | 0.94 | **1.00** | **0.02** | **1.00** |
+| illegal writes / episode | 0.050 | 0.002 | 0.185 | 0.171 | 0.221 | 0.189 |
 
-SFT **hurt**: APIGen-MT teaches the model to ask a user simulator for missing information,
-and this environment has none, so half of SFT episodes end without a tool call. GRPO then
-recovered the loss and went well past base, and a task family held out of RL entirely rose
-from 0.01 to 0.55. Policy violations tripled under RL — reported, not hidden. Full analysis
-in [WRITEUP.md](WRITEUP.md) §3.
+Three findings, none visible from the headline number alone:
+
+- **SFT hurt** (0.140 → 0.037) — APIGen-MT teaches it to ask a user simulator for missing
+  information, and this environment has none, so half of SFT episodes make no tool call.
+- **SFT is still worth +0.305 as an RL prior.** At matched compute RL reaches 0.489 from
+  scratch and 0.794 from the SFT adapter. Worthless as a policy, decisive as an initialisation.
+- **The top score, 0.935, is a reward hack.** RL-only at 200 steps skips user identification
+  in 98.2% of write episodes and fires the write with the id leaked in the prompt. The best
+  genuine agent is **SFT+RL at 30 steps, 0.794**.
+
+Full analysis in [WRITEUP.md](WRITEUP.md) §3.
 
 ## The loop
 
