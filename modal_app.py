@@ -410,6 +410,7 @@ BFCL_ARMS = {
     "grpo": "/work/checkpoints/grpo",
     "rl_only_long": "/work/checkpoints/rl_only_long",
     "sft_mixed": "/work/checkpoints/sft_mixed",
+    "grpo_mixed": "/work/checkpoints/grpo_mixed",
 }
 
 

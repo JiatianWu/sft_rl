@@ -111,6 +111,45 @@ examples, and no clean claim is available either way.
 
 ---
 
+# Follow-up 2: is the mixed corpus still a good RL prior?
+
+Pre-registered before training `grpo_mixed`, same rules.
+
+SFT's value in this project was never as a policy — it *lowered* in-domain success to 0.035 —
+but as an initialisation worth +0.301 (§3.1), and as the thing that anchored the agent to a
+procedure the reward never paid for (§3.3, lookup compliance 1.00 where RL-only fell to 0.02).
+`sft_mixed` changes the corpus that produced both effects, so both have to be re-measured.
+GRPO runs 30 steps from `sft_mixed`, matching the `grpo` arm exactly, so the prior is the only
+variable.
+
+There is a real argument in each direction, which is what makes it worth running. Against: half
+the domain-matched multi-turn data is gone. For: SFT's in-domain pathology was *asking instead of
+acting*, and the mix already moves the model toward acting (should-call 0.375 → 0.812), which is
+precisely the failure GRPO otherwise had to spend its budget repairing.
+
+**P8 — `grpo_mixed` beats RL-only at matched compute (0.496).** The weak claim that the mixed
+corpus is still worth using as an initialisation at all.
+
+*Refuted if* it lands at or below 0.496, meaning the mix destroyed SFT's value as a prior.
+
+**P9 — `grpo_mixed` shows lower lookup compliance than `grpo`'s 1.00.** §3.3 argues the anchoring
+came from SFT's over-caution, and the mix traded exactly that away. If anchoring is a side effect
+of over-caution rather than of SFT per se, diluting the over-caution should let RL drift toward
+the §3.3 shortcut.
+
+*Refuted if* compliance stays at or near 1.00, which would mean SFT anchors procedure for some
+reason other than timidity.
+
+**P10 — `grpo_mixed` keeps parallel calling on BFCL, above 0.4.** RL-only preserved base
+capability (§3.6), so RL from a prior that *has* parallel calling should not destroy it, even
+though the RL environment is single-call. This is the test of whether the §3.7 repair survives
+the second stage — a repair that RL undoes would be worthless in this pipeline.
+
+*Refuted if* `parallel` falls back toward zero, which would mean single-call RL erases it
+regardless of the prior and the fix has to be applied after RL, not before.
+
+---
+
 # Outcome
 
 Added after the run. Full numbers and discussion in `WRITEUP.md` §3.6; reproduce with
