@@ -105,9 +105,17 @@ def main() -> None:
     parser.add_argument("--max-tokens", type=int, default=512)
     parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--out", type=Path, default=Path("results"))
+    parser.add_argument(
+        "--families",
+        default=None,
+        help="comma-separated family override. Left unset the split is the same six families every "
+        "reported arm was measured on; pass `irrelevant_request` to score the abstention family, "
+        "which is kept out of the headline split so `pass^1` stays comparable.",
+    )
     args = parser.parse_args()
 
-    specs = build_specs(args.n_seeds, EVAL_FAMILIES, args.difficulty)
+    families = args.families.split(",") if args.families else EVAL_FAMILIES
+    specs = build_specs(args.n_seeds, families, args.difficulty)
     print(f"[eval] {args.tag}: {len(specs)} tasks x {args.trials} trials")
 
     started = time.time()

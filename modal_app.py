@@ -368,6 +368,7 @@ def rl_arm(
     steps: int = 30,
     n_seeds: int = 100,
     trials: int = 4,
+    include_abstain: bool = False,
 ) -> None:
     """One RL arm end to end: GRPO then evaluation, in a single container.
 
@@ -375,6 +376,10 @@ def rl_arm(
     (`adapter="none"`, a fresh LoRA) to find out whether the SFT stage earns its place given
     that it *lowered* success, and a longer run from the SFT adapter to test whether the
     residual failures are undertraining rather than design.
+
+    `include_abstain` adds `irrelevant_request` to the RL mix, whose correct episode makes no tool
+    call at all. It is scored separately rather than folded in, because the headline split has to
+    keep meaning what it meant for the arms already reported (§3.9).
     """
     import subprocess
 
@@ -386,6 +391,8 @@ def rl_arm(
     ]
     if adapter and adapter != "none":
         train += ["--adapter", adapter]
+    if include_abstain:
+        train += ["--include-abstain"]
 
     print(f"\n{'=' * 70}\n[{tag}] GRPO, {steps} steps, adapter={adapter}\n{'=' * 70}", flush=True)
     subprocess.run(train, check=True)
@@ -401,6 +408,21 @@ def rl_arm(
         check=True,
     )
     workspace.commit()
+
+    if include_abstain:
+        # Separate pass, separate tag: the abstention family is not part of the 600-task split,
+        # and its topics are held out from training so this measures restraint rather than recall.
+        print(f"\n{'=' * 70}\n[{tag}] eval abstention family\n{'=' * 70}", flush=True)
+        subprocess.run(
+            [
+                "python", "-m", "tooluse.eval.run_eval",
+                "--tag", f"{tag}_abstain", "--adapter", output,
+                "--families", "irrelevant_request",
+                "--n-seeds", str(n_seeds), "--trials", str(trials), "--out", "/work/results",
+            ],
+            check=True,
+        )
+        workspace.commit()
     print(f"[{tag}] done", flush=True)
 
 
@@ -411,6 +433,7 @@ BFCL_ARMS = {
     "rl_only_long": "/work/checkpoints/rl_only_long",
     "sft_mixed": "/work/checkpoints/sft_mixed",
     "grpo_mixed": "/work/checkpoints/grpo_mixed",
+    "grpo_abstain": "/work/checkpoints/grpo_abstain",
 }
 
 

@@ -12,7 +12,10 @@ import json
 import pytest
 
 from tooluse.env import FAMILIES, RewardConfig, sample_task
+from tooluse.env.splits import EVAL_FAMILIES, TEST_SEEDS
+from tooluse.env.tasks import ABSTAIN_FAMILY
 from tooluse.eval.harness import aggregate, parse_tool_calls, pass_hat_k, run_episode
+from tooluse.eval.run_eval import build_specs
 
 CONFIG = RewardConfig()
 
@@ -77,6 +80,91 @@ def test_refusal_requires_escalating_not_just_apologising() -> None:
 
     escalating = run_episode(_oracle_generator(spec), spec, CONFIG)
     assert escalating.scores["r_outcome"] == 1.0
+
+
+def _one_read_then_decline(messages, tools):
+    """A lookup, then a perfectly worded refusal — the behaviour RL currently rewards."""
+    if not any(m.get("role") == "tool" for m in messages):
+        return '<tool_call>\n{"name": "list_user_orders", "arguments": {"user_id": "U1"}}\n</tool_call>'
+    return "I'm sorry, I can't help with that."
+
+
+def _escalating_generator(messages, tools):
+    if not any(m.get("role") == "tool" for m in messages):
+        return '<tool_call>\n{"name": "transfer_to_human", "arguments": {"summary": "out of scope"}}\n</tool_call>'
+    return "I can't help with that, so I've passed you to a colleague."
+
+
+def _cheerful_generator(messages, tools):
+    return "Sure thing, happy to help with that!"
+
+
+def test_abstaining_scores_only_when_nothing_is_called() -> None:
+    """The one behaviour `tau-retail-lite` could not express before (§3.9).
+
+    Every other family, `refuse_invalid` included, is scoreable only by leaving a state
+    footprint, so a fifth of RL training taught that out-of-policy requests warrant four to five
+    tool calls — the opposite of what BFCL irrelevance scores.
+    """
+    spec = sample_task(0, ABSTAIN_FAMILY, "easy")
+    good = run_episode(_silent_generator, spec, CONFIG)
+    assert good.scores["r_outcome"] == 1.0
+    assert good.scores["n_calls"] == 0.0
+    # Full marks, so abstaining is competitive with solving any other family.
+    assert good.scores["reward"] == pytest.approx(1.3)
+
+
+def test_reading_before_declining_is_not_abstaining() -> None:
+    """The regression the state check alone cannot catch.
+
+    Reads leave the database untouched, so `db_hash` matches and the refusal text passes the
+    output check: without folding restraint into `r_action`, four wasted lookups followed by a
+    polite decline would score a perfect 1.0 on the family that exists to teach restraint.
+    """
+    spec = sample_task(0, ABSTAIN_FAMILY, "easy")
+    result = run_episode(_one_read_then_decline, spec, CONFIG)
+    assert result.scores["r_output"] == 1.0, "the refusal text itself was fine"
+    assert result.scores["r_action"] == 0.0, "but calling anything must fail the task"
+    assert result.scores["r_outcome"] == 0.0
+
+
+def test_escalating_an_out_of_scope_request_is_not_abstaining() -> None:
+    """Scored the way BFCL scores irrelevance: any call is wrong, `transfer_to_human` included.
+
+    Deliberately stricter than the system prompt, whose escalation clause covers policy-forbidden
+    *actions* rather than out-of-scope requests. The prompt is left untouched so every previously
+    measured arm stays comparable, which means this distinction lives in the task, not the policy.
+    """
+    spec = sample_task(0, ABSTAIN_FAMILY, "easy")
+    assert run_episode(_escalating_generator, spec, CONFIG).scores["r_outcome"] == 0.0
+
+
+def test_saying_nothing_useful_is_not_abstaining_either() -> None:
+    """Guards the mirror-image hack that created §3.9 in the first place.
+
+    An abstention task's correct state is the untouched database, which a model that does nothing
+    at all also produces. That is exactly how passivity once scored 1.0 on `refuse_invalid`. The
+    fix there was to require a write; here it is the output check, so restraint stays expressible
+    without making a state footprint mandatory.
+    """
+    spec = sample_task(0, ABSTAIN_FAMILY, "easy")
+    result = run_episode(_cheerful_generator, spec, CONFIG)
+    assert result.scores["n_calls"] == 0.0, "it did abstain from calling"
+    assert result.scores["r_outcome"] == 0.0, "but never actually declined"
+
+
+def test_abstention_topics_are_held_out_between_train_and_test() -> None:
+    """Otherwise the in-domain score cannot tell restraint from having memorised 24 strings."""
+    train = {sample_task(s, ABSTAIN_FAMILY, "easy").instruction for s in range(2000)}
+    test = {sample_task(s, ABSTAIN_FAMILY, "easy").instruction for s in TEST_SEEDS}
+    assert test and not (train & test)
+
+
+def test_headline_eval_split_is_unchanged_by_the_abstention_family() -> None:
+    """Comparability guard: `pass^1` must keep meaning what it meant for every reported arm."""
+    assert EVAL_FAMILIES == FAMILIES
+    assert ABSTAIN_FAMILY not in EVAL_FAMILIES
+    assert len(build_specs(100, EVAL_FAMILIES, "easy")) == 600
 
 
 def test_malformed_calls_are_counted_and_penalised() -> None:

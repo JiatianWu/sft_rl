@@ -70,7 +70,12 @@ def check_outputs(required: list[list[str]], text: str) -> bool:
 def compute_reward(spec, rollout: Rollout, db: dict[str, Any], config: RewardConfig) -> dict[str, float]:
     """Score one episode, returning the total alongside every component for logging."""
     # --- Grounded outcome: state check AND output check, as a product. ---
-    r_action = float(db_hash(db) == spec.expected_hash)
+    # For an abstention task the required state is "untouched", which reads already satisfy, so
+    # the hash alone cannot distinguish a correct refusal from four wasted lookups followed by
+    # one. Restraint is therefore folded into the state term rather than left to `r_progress`:
+    # it has to be able to make the episode a failure, not merely a less tidy success.
+    left_alone = not (spec.expect_no_calls and rollout.calls)
+    r_action = float(db_hash(db) == spec.expected_hash and left_alone)
     r_output = float(check_outputs(spec.required_outputs, rollout.assistant_text))
     r_outcome = r_action * r_output
 
@@ -86,6 +91,9 @@ def compute_reward(spec, rollout: Rollout, db: dict[str, Any], config: RewardCon
                 break
     if spec.oracle_actions:
         r_progress = matched / len(spec.oracle_actions)
+    elif spec.expect_no_calls:
+        # Abstention task: progress means having called nothing at all, not merely not writing.
+        r_progress = 0.0 if rollout.calls else 1.0
     else:
         # Read-only task: progress means having refrained from writing at all.
         wrote = any(c["name"] in WRITE_ACTIONS for c in rollout.calls)

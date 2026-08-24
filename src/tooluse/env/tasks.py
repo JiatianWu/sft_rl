@@ -32,6 +32,80 @@ FAMILIES = [
     "refuse_invalid",
 ]
 
+# Deliberately *not* in FAMILIES, so `EVAL_FAMILIES` keeps producing the same 600-task split
+# every committed number was measured on. Adding it there would silently make `pass^1`
+# incomparable with every arm already reported.
+ABSTAIN_FAMILY = "irrelevant_request"
+ALL_FAMILIES = FAMILIES + [ABSTAIN_FAMILY]
+
+# Requests no tool in this environment can serve. The correct episode makes *no call at all* and
+# says so, which is the one behaviour `tau-retail-lite` could not previously express: every other
+# family, `refuse_invalid` included, is only scoreable by leaving a state footprint (§3.9).
+#
+# Deliberately many, and crossed with openers below. A short list would be trained on ~125 times
+# each over a 1,000-task RL run, and the model could reach a perfect in-domain score by memorising
+# the strings while learning nothing about restraint — which would look exactly like success and
+# would not move BFCL irrelevance at all.
+OUT_OF_SCOPE_REQUESTS = [
+    "what the weather in Portland is going to be tomorrow",
+    "booking me a flight to Denver next Friday",
+    "what Apple's share price is right now",
+    "a good recipe for risotto",
+    "translating 'thank you for your help' into Japanese",
+    "reserving a table for four at an Italian place tonight",
+    "what 17 percent of 4,830 comes to",
+    "who won the football game last night",
+    "what the capital of Australia is",
+    "setting a reminder for my dentist appointment",
+    "writing a birthday message for my sister",
+    "what time the pharmacy on Third Street closes",
+    "whether this rash on my arm looks serious",
+    "how to fix a leaking kitchen tap",
+    "what the traffic is like on the freeway right now",
+    "summarising the news from this morning",
+]
+
+# Held out the way databases are: a test episode's topic never appeared in training. Without this
+# the two pools are identical, every test surface form is one the model was trained on, and the
+# in-domain abstention score measures memorisation of 24 strings. The external check (BFCL
+# irrelevance) is unaffected either way, but an in-domain number that cannot distinguish recall
+# from restraint is worse than no number.
+HELD_OUT_SCOPE_REQUESTS = [
+    "sending an email to my landlord",
+    "what my horoscope says today",
+    "how many kilometres it is from Boston to Chicago",
+    "explaining how a mortgage rate is calculated",
+    "which laptop I should buy for video editing",
+    "the score of yesterday's cricket match",
+    "calling me a taxi to the airport",
+    "what the exchange rate is between euros and yen",
+]
+
+# Mirrors the seed split in `splits.py`, which cannot be imported here without a cycle. The
+# assertion tying the two together lives there.
+TEST_SEED_FLOOR = 100_000
+
+# Crossed with the requests above, so ~200 surface forms rather than a couple of dozen.
+OUT_OF_SCOPE_OPENERS = [
+    "Hi, quick unrelated question — can you help me with {}?",
+    "While I have you, could you help with {}?",
+    "Hey, I need help with {}.",
+    "One more thing: {}, please.",
+    "Sorry, off topic, but I was wondering about {}.",
+    "Can you help me with {}?",
+    "Before I forget — {}?",
+    "I'd really appreciate help with {}.",
+]
+
+# Any one of these is accepted as having declined. Substring matching is permissive on purpose:
+# the graded behaviour is *not calling anything*, and the text check exists only to separate a
+# deliberate decline from a model that emitted nothing at all — which is the exact hole that made
+# passivity score 1.0 on `refuse_invalid` before escalation was given a state footprint.
+DECLINE_PHRASES = [
+    "cannot", "can't", "can not", "unable", "not able", "do not have", "don't have",
+    "no tool", "not something", "outside", "beyond", "afraid", "only help", "only assist",
+]
+
 # Families ordered by how many tool calls the oracle needs. Used for the RL curriculum.
 EASY_FAMILIES = ["lookup_and_report", "cancel_order", "refuse_invalid"]
 
@@ -68,6 +142,10 @@ class TaskSpec:
     oracle_actions: list[dict[str, Any]]
     required_outputs: list[list[str]] = field(default_factory=list)
     expected_hash: str = ""
+    # When set, a correct episode makes no tool call whatsoever. Distinct from an empty
+    # `oracle_actions`, which only requires refraining from *writes* — `lookup_and_report` has an
+    # empty oracle and still expects the model to read.
+    expect_no_calls: bool = False
 
     @property
     def oracle_writes(self) -> list[dict[str, Any]]:
@@ -189,6 +267,17 @@ def sample_task(seed: int, family: str | None = None, difficulty: str = "easy") 
             f"My email is {user['email']}."
         )
 
+    elif family == ABSTAIN_FAMILY:
+        # No user email, no order id: nothing here is even addressable by a tool, so a lookup is
+        # not merely wasteful but impossible to ground. Scored as BFCL scores irrelevance — any
+        # call at all is wrong, including `transfer_to_human`. That is stricter than the system
+        # prompt's escalation clause, which covers policy-forbidden *actions* rather than
+        # out-of-scope requests; the prompt is left untouched so every other arm stays comparable.
+        pool = HELD_OUT_SCOPE_REQUESTS if seed >= TEST_SEED_FLOOR else OUT_OF_SCOPE_REQUESTS
+        instruction = rng.choice(OUT_OF_SCOPE_OPENERS).format(rng.choice(pool))
+        oracle = []
+        required = [list(DECLINE_PHRASES)]
+
     else:
         raise ValueError(f"unknown family: {family}")
 
@@ -209,4 +298,5 @@ def sample_task(seed: int, family: str | None = None, difficulty: str = "easy") 
         oracle_actions=oracle,
         required_outputs=required,
         expected_hash=db_hash(expected_db),
+        expect_no_calls=family == ABSTAIN_FAMILY,
     )

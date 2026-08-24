@@ -627,16 +627,75 @@ repair the second stage undid would be useless here.
 The restraint column is the finding I did not predict at any point. `sft_mixed + RL` is the most
 capable arm at *calling* (should-call 0.875, best measured, above base's 0.625) and the worst at
 *not* calling (0.454 against base's 0.801). Both stages push the same direction: Hermes teaches
-"call something" because every one of its trajectories does, and the GRPO reward pays only for
-completed tasks, so neither stage ever pays for silence.
+"call something" because every one of its trajectories does. GRPO's contribution is more specific,
+and I got it wrong at first.
 
 Ordering the six arms by should-not-call recovers the should-call column almost exactly in reverse
 — 0.375, 0.625, 0.812, 0.812, 0.750, 0.875, one inversion, and that between two arms 0.008 apart on
 the sort key. **This pipeline has one act/abstain dial, and every intervention turns it, none of
 them deliberately.** The caveat is that `should call` is BFCL's `live_relevance`, only 16 cases, so
 each step is one or two examples and it cannot carry the claim alone; the abstention column
-(n=1,124) is what makes the pattern solid. The fix is a reward term for correct abstention plus
-irrelevance episodes in the environment, neither of which exists today.
+(n=1,124) is what makes the pattern solid.
+
+### 3.9 The RL environment trains against abstention, and a bug fix is why
+
+My first explanation for the restraint column was that nothing in the pipeline pays for abstaining.
+That is false, and checking it against the environment code rather than my own summary of it
+produced the sharpest finding in the project.
+
+The environment has a `refuse_invalid` family — the user asks to cancel an already-delivered order,
+which the policy forbids — and it pays *full* reward for declining, up to the same 1.3 any other
+family can earn. So abstention is rewarded. The catch is how it must be expressed:
+
+```181:190:src/tooluse/env/tasks.py
+    elif family == "refuse_invalid":
+        order_id, order = _pick_order(rng, db, DELIVERED)
+        user = db["users"][order["user_id"]]
+        # The user asks for something policy forbids: cancelling an already-delivered order.
+        oracle = [{"name": "transfer_to_human", "args": {}}]
+```
+
+`transfer_to_human` is in `WRITE_ACTIONS`, and `r_action` compares the final database hash against
+an oracle database in which `escalated=True`. A model that simply says "I can't help with that"
+and calls nothing leaves the database untouched, fails the state check, and scores **exactly
+0.0**. In the committed episode records, across 800 refusal episodes in the two RL arms, **no
+successful episode made zero tool calls**; successful ones average **4.47** calls (`grpo`) and
+**4.57** (`grpo_mixed`), typically lookups, then a doomed `cancel_pending_order` attempt costing
+−0.4, then the escalation. `refuse_invalid` is 1 of 5 RL training families.
+
+So the environment does not fail to pay for silence — **it trains, in roughly a fifth of RL
+samples, that the correct response to an out-of-policy request is four to five tool calls.** BFCL
+irrelevance asks for precisely the opposite: no call, decline in text. The conflict is not an
+oversight in the reward, it is an actively trained-in opposite, which is a much better fit for the
+data than my original story: restraint degrades monotonically with RL exposure (0.896 → 0.645 →
+0.460) while lookup compliance stays pinned at 0.998, because the environment is specific about
+*which* procedure to follow and specific about always having one.
+
+**And it is there because of a reward-hack patch.** The test that pins this behaviour says why:
+
+```67:72:tests/test_harness.py
+def test_refusal_requires_escalating_not_just_apologising() -> None:
+    """Regression: a model that only says "I can't help" must not score on a refusal task.
+
+    Before `transfer_to_human` had a state footprint, doing nothing produced the correct
+    final database and the task had no required outputs, so passivity scored a perfect 1.0.
+    """
+```
+
+The original bug was the mirror image: with no state footprint and no required outputs, the
+*correct* final state for a refusal task was the untouched database, so a model that did nothing at
+all scored a perfect 1.0 on the family meant to test judgement. Giving escalation a state footprint
+fixed that cleanly and, in doing so, made "call nothing" unscoreable anywhere in the environment.
+**A patch for one reward hack installed the bias that an external benchmark measured two weeks
+later**, and neither the in-domain metric nor the test suite could see it, because both were built
+around the same assumption that a correct episode has a state footprint.
+
+The narrow fix is not to weaken that test. Escalating *is* correct retail conduct and the policy
+says so, so `refuse_invalid` should keep requiring it. What is missing is a family where the right
+answer genuinely is no call at all, scored by the output check rather than the state check — the
+machinery for which already exists, since `lookup_and_report` is scored with an empty oracle and
+`r_progress` defined as having refrained from writing. It needs one extension: for such a family,
+refraining must mean *no calls*, not merely no writes.
 
 ---
 
@@ -691,10 +750,14 @@ changed the design:
   mixed prior reaches 0.475 against 0.797 from the original — no better than no prior at all.
   Holding the corpus at 1,000 trajectories was a control, and it forced the two goals to trade;
   whether they still trade at 1,500 is untested and is the first thing I would run.
-- **Nothing in either stage pays for abstention** (§3.8). Ordering the arms by should-not-call
-  recovers should-call in near-reverse, and the final arm is the worst abstainer measured (0.454
-  against base's 0.801). This was never a design decision — it is a gap in the reward, which has
-  no term for correct refusal, and in the environment, which has no irrelevance episodes.
+- **The RL environment actively trains against abstention** (§3.9). Ordering the arms by
+  should-not-call recovers should-call in near-reverse, and the final arm is the worst abstainer
+  measured (0.454 against base's 0.801). My first explanation — that nothing pays for abstention —
+  was wrong: `refuse_invalid` pays full reward for declining, but only via `transfer_to_human`,
+  a write, so a text-only decline scores 0.0 and successful refusals average 4.5 calls. A fifth of
+  RL training therefore teaches that out-of-policy requests warrant four to five calls, which is
+  the opposite of what BFCL irrelevance scores. Worse, that requirement exists because it patched
+  an earlier hack in which passivity scored a perfect 1.0.
 - **BFCL multi-turn was underpowered for the question it was run to answer.** One category,
   200 cases, ~6% accuracy: the 95% interval is roughly ±3.3 points, so P1 needed a gap of five
   points to register and got one test case. The four-category multi-turn suite (800 cases) was

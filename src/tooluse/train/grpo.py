@@ -21,13 +21,14 @@ from trl import GRPOConfig, GRPOTrainer
 
 from tooluse.data.masking import CHAT_TEMPLATE_KWARGS
 from tooluse.env.retail import RetailEnv, build_prompt
-from tooluse.env.splits import RL_TRAIN_FAMILIES, TRAIN_SEEDS
+from tooluse.env.splits import RL_TRAIN_FAMILIES, RL_TRAIN_FAMILIES_WITH_ABSTAIN, TRAIN_SEEDS
 from tooluse.train.rewards import protocol_reward, task_reward
 
 
-def build_train_dataset(n_tasks: int, seed: int = 0) -> Dataset:
+def build_train_dataset(n_tasks: int, seed: int = 0, families: list[str] | None = None) -> Dataset:
     """Sample RL tasks. Columns other than `prompt` are forwarded to `RetailEnv.reset`."""
     rng = random.Random(seed)
+    families = families or RL_TRAIN_FAMILIES
     seeds = rng.sample(list(TRAIN_SEEDS), min(n_tasks, len(TRAIN_SEEDS)))
     rows = []
     for task_seed in seeds:
@@ -35,7 +36,7 @@ def build_train_dataset(n_tasks: int, seed: int = 0) -> Dataset:
             {
                 "prompt": build_prompt(),
                 "seed": task_seed,
-                "family": rng.choice(RL_TRAIN_FAMILIES),
+                "family": rng.choice(families),
                 "difficulty": "easy",
             }
         )
@@ -54,6 +55,13 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--max-turns", type=int, default=8)
     parser.add_argument("--protocol-weight", type=float, default=0.3)
+    parser.add_argument(
+        "--include-abstain",
+        action="store_true",
+        help="add `irrelevant_request` to the training mix: episodes whose correct answer is no "
+        "tool call at all. Every other family is only scoreable by leaving a state footprint, so "
+        "without this the environment trains against abstention (see WRITEUP.md §3.9).",
+    )
     parser.add_argument("--no-vllm", action="store_true")
     parser.add_argument("--vllm-memory", type=float, default=0.25)
     args = parser.parse_args()
@@ -78,8 +86,11 @@ def main() -> None:
         model = PeftModel.from_pretrained(model, str(args.adapter), is_trainable=True)
         print(f"[grpo] continuing from SFT adapter {args.adapter}")
 
-    dataset = build_train_dataset(n_tasks=args.steps * args.batch_size * args.grad_accum)
-    print(f"[grpo] {len(dataset)} tasks over families {RL_TRAIN_FAMILIES}")
+    families = RL_TRAIN_FAMILIES_WITH_ABSTAIN if args.include_abstain else RL_TRAIN_FAMILIES
+    dataset = build_train_dataset(
+        n_tasks=args.steps * args.batch_size * args.grad_accum, families=families
+    )
+    print(f"[grpo] {len(dataset)} tasks over families {families}")
 
     config = GRPOConfig(
         output_dir=str(args.output),

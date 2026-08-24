@@ -93,7 +93,15 @@ plus 500 Hermes, twenty more minutes of GPU.
 One dial explains most of the project. Order the six arms by how well they abstain and the
 willingness-to-call column comes back in near-perfect reverse; every intervention moved it, none on
 purpose, and `sft_mixed + RL` ends up best-in-class at calling (0.875) and worst at staying silent
-(0.454). Nothing in either stage ever pays for silence. [WRITEUP.md](WRITEUP.md) §3.8.
+(0.454). [WRITEUP.md](WRITEUP.md) §3.8.
+
+The cause is not the one I first wrote down. The environment *does* pay full reward for refusing —
+but only via `transfer_to_human`, a state-changing call, so a text-only decline scores exactly 0.0
+and successful refusals average 4.5 tool calls. A fifth of RL training teaches that an out-of-policy
+request warrants four to five calls, which is the exact opposite of what BFCL irrelevance scores.
+That requirement exists because it patched an earlier hack where doing nothing scored a perfect
+1.0 — **a reward-hack fix installed the bias an external benchmark found later**, and nothing
+in-domain could see it. [WRITEUP.md](WRITEUP.md) §3.9.
 
 ## The loop
 

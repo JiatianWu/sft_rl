@@ -150,6 +150,56 @@ regardless of the prior and the fix has to be applied after RL, not before.
 
 ---
 
+# Follow-up 3: can restraint be trained back without losing the rest?
+
+Pre-registered before training `grpo_abstain`, same rules.
+
+§3.9 found the mechanism behind the collapsing restraint column, and it is not the absence of a
+reward. `refuse_invalid` pays full reward for declining, but only via `transfer_to_human`, a write,
+so a text-only decline scores exactly 0.0 and successful refusals average 4.5 calls. A fifth of RL
+training therefore teaches that an out-of-policy request warrants four to five calls, which is the
+opposite of what BFCL irrelevance scores.
+
+**The intervention.** A new family, `irrelevant_request`: the user asks something no tool here can
+serve, and the correct episode makes *no call at all* and says so. Restraint is folded into the
+state term rather than into progress, so calling anything fails the task outright rather than
+merely scoring untidily — reads leave the database untouched, so the hash check alone cannot tell a
+refusal from four wasted lookups followed by one. Topics are held out between train and test the
+way databases already are, so the in-domain number measures restraint rather than recall of 24
+strings. GRPO then runs 30 steps from `sft_mixed`, matching `grpo_mixed` exactly, so the training
+mix is the only variable. The system prompt is deliberately untouched, and the headline 600-task
+split is unchanged (verified by fingerprint), so every previously reported number stays comparable.
+
+**P11 — BFCL restraint recovers materially above `grpo_mixed`'s 0.460.** This is the whole point:
+an in-domain family that is graded on not calling should move the external metric graded on not
+calling. I expect it to land between `grpo_mixed` and base's 0.798 rather than above base, since
+one family in six is a weak signal against a corpus and a reward that both favour acting.
+
+*Refuted if* restraint stays within noise of 0.460 (the floor is 0.012–0.017), which would mean
+in-domain abstention training does not transfer and the act/abstain axis is set by the SFT corpus
+rather than by RL.
+
+**P12 — AST holds within noise of `grpo_mixed`'s 0.755.** Restraint and syntax should be separable;
+if buying restraint costs parallel calling again, the "one dial" reading is stronger than I think
+and the two are not independently addressable at this scale.
+
+**P13 — in-domain `pass^1` on the unchanged six families stays within ±0.05 of 0.475.** One added
+family in six dilutes the others by ~17%, so some drop is expected, but a large fall would mean
+teaching restraint costs task completion — which is the trade this experiment exists to price.
+
+**P14 — `refuse_invalid` drops.** The new family says "when you cannot help, call nothing"; the old
+one says "when the policy forbids it, call `transfer_to_human`". Those are genuinely adjacent and
+the model has to separate them on a distinction the system prompt draws only implicitly. This is
+the predicted *cost*, stated in advance so a drop cannot later be presented as an acceptable
+detail.
+
+**What would make this uninformative.** If the model learns to abstain by never calling anything
+anywhere, in-domain `pass^1` will collapse and BFCL restraint will look excellent for the wrong
+reason. The should-call column (`live_relevance`) and `pass^1` are the guards; both have to hold up
+for a restraint gain to mean anything.
+
+---
+
 # Outcome
 
 Added after the run. Full numbers and discussion in `WRITEUP.md` §3.6; reproduce with
@@ -234,8 +284,15 @@ right, since it means the anchoring is robust to changing the data.
 0.590 → 0.605, pooled AST 0.728 → 0.755. Thirty steps of single-call RL do not erase parallel
 calling once the prior has it, so §3.7's fix belongs before RL and stays there. Restraint degrades
 further and by a lot, though: pooled 0.645 → 0.460, should-not-call 0.642 → 0.454, the worst of any
-checkpoint measured. Both stages push the same way on the act/abstain axis, and nothing in the
-pipeline pays for abstaining.
+checkpoint measured. Both stages push the same way on the act/abstain axis.
+
+My first reading of that — nothing in the pipeline pays for abstaining — was wrong, and checking it
+against the environment source rather than against my own summary of it gave a better answer
+(§3.9). `refuse_invalid` pays full reward for declining, but only through `transfer_to_human`,
+which is a write, so a text-only decline scores exactly 0.0 and successful refusals average 4.5
+calls. A fifth of RL training therefore teaches that out-of-policy requests warrant four to five
+calls — the opposite of what BFCL irrelevance scores. And that requirement is itself a patch for an
+earlier hack in which doing nothing scored a perfect 1.0.
 
 **The failure mode named in advance nearly happened, for a different reason.** The pre-registered
 worry was all-zero multi-turn scores. Instead the first complete sweep returned four
