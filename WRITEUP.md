@@ -3,26 +3,26 @@
 **Time budget:** 4 hours, hard cap. **Compute:** Modal, single A10.
 **Model:** `Qwen3-0.6B`. **Artifacts:** `results/`, one JSON record per episode.
 
-Task success on 2,400 held-out episodes per checkpoint, six arms:
+Task success on 2,400 held-out episodes per checkpoint, six arms, all measured on one metric:
 
 | | Base | + SFT | RL only (30) | SFT+RL (30) | RL only (200) | SFT+RL (200) |
 |---|---|---|---|---|---|---|
-| **pass^1** | 0.140 | 0.037 | 0.489 | **0.794** | *0.935* | 0.863 |
-| **looked up before writing** | 0.13 | 0.42 | 0.94 | **1.00** | **0.02** | **1.00** |
+| **pass^1** | 0.132 | 0.035 | 0.496 | **0.797** | *0.929* | 0.868 |
+| **looked up before writing** | 0.14 | 0.42 | 0.94 | **1.00** | **0.02** | **1.00** |
 
 Three findings, none of which the headline number shows on its own.
 
-**SFT made the model measurably worse** (0.140 → 0.037) for a diagnosable reason: APIGen-MT
+**SFT made the model measurably worse** (0.132 → 0.035) for a diagnosable reason: APIGen-MT
 teaches it to ask a user simulator for missing information, and this environment has none, so
-asking ends the episode having done nothing. **Yet SFT is worth +0.305 as an RL prior** — at
-matched compute RL reaches 0.489 from scratch and 0.794 from the SFT adapter. Judged as a
+asking ends the episode having done nothing. **Yet SFT is worth +0.301 as an RL prior** — at
+matched compute RL reaches 0.496 from scratch and 0.797 from the SFT adapter. Judged as a
 policy it should be deleted; judged as an initialisation it is decisive. Only the ablation
 separates those claims.
 
-**The highest score in the table is a reward hack.** RL-only at 200 steps scores 0.935 by
-skipping user identification in 98.2% of write episodes and firing the write directly with the
+**The highest score in the table is a reward hack.** RL-only at 200 steps scores 0.929 by
+skipping user identification in 98.4% of write episodes and firing the write directly with the
 id leaked in the prompt — exploiting the fact that my reward scores final state but never the
-policy. The best *genuine* agent is SFT+RL at 30 steps, 0.794. Everything above it is
+policy. The best *genuine* agent is SFT+RL at 30 steps, 0.797. Everything above it is
 artifact, and §3.3 explains why the failure was mine rather than the model's.
 
 The through-line is that every headline number here was misleading in isolation, and what
@@ -136,8 +136,8 @@ Four things address this, and one metric monitors it:
 4. **G = 8**, to raise the chance of at least one success per group.
 
 The ablation (§3.1) says (3) worked, but not for the stated reason. SFT *lowered* success to
-0.037, so it supplied no successes to differentiate — yet RL from the SFT adapter still beat
-RL from scratch by 0.305. What SFT contributed was a policy-compliant procedure to vary
+0.035, so it supplied no successes to differentiate — yet RL from the SFT adapter still beat
+RL from scratch by 0.301. What SFT contributed was a policy-compliant procedure to vary
 around, not variance in outcome. The early gradient came from the shaping terms: a model that
 asks a question scores zero on progress and format alike, while one that emits a well-formed
 call scores on both, so groups differentiated even when no rollout in them fully succeeded.
@@ -154,102 +154,122 @@ so they differ from the SFT arms in initialisation alone.
 
 | Metric | Base | + SFT | RL only (30) | SFT+RL (30) | RL only (200) | SFT+RL (200) |
 |---|---|---|---|---|---|---|
-| **pass^1** | 0.140 | 0.037 | 0.489 | **0.794** | *0.935* | 0.863 |
-| **pass^4** | 0.140 | 0.033 | 0.427 | 0.775 | *0.932* | 0.853 |
-| state correct | 0.253 | 0.203 | 0.641 | 0.908 | 0.946 | 0.967 |
-| reported correctly | 0.563 | 0.446 | 0.805 | 0.870 | 0.969 | 0.882 |
-| tool calls / episode | 1.12 | 1.33 | 2.80 | 3.51 | **1.17** | 3.70 |
-| illegal writes / episode | 0.050 | 0.002 | 0.185 | 0.171 | 0.221 | 0.189 |
-| **looked up before writing** | 0.129 | 0.416 | 0.939 | **1.000** | **0.018** | **1.000** |
+| **pass^1** | 0.132 | 0.035 | 0.496 | **0.797** | *0.929* | 0.868 |
+| **pass^4** | 0.132 | 0.033 | 0.443 | 0.782 | *0.922* | 0.863 |
+| state correct | 0.245 | 0.200 | 0.638 | 0.899 | 0.929 | 0.963 |
+| reported correctly | 0.563 | 0.448 | 0.812 | 0.879 | 0.973 | 0.888 |
+| tool calls / episode | 1.13 | 1.32 | 2.78 | 3.52 | **1.17** | 3.71 |
+| illegal writes / episode | 0.047 | 0.000 | 0.186 | 0.169 | 0.240 | 0.193 |
+| **looked up before writing** | 0.137 | 0.415 | 0.936 | **1.000** | **0.016** | **1.000** |
 
 | Task family | Base | + SFT | RL only (30) | SFT+RL (30) | RL only (200) | SFT+RL (200) |
 |---|---|---|---|---|---|---|
-| `cancel_order` | 0.00 | 0.00 | 0.55 | 0.68 | 1.00 | 1.00 |
-| `modify_address` | 0.51 | 0.21 | 0.88 | 1.00 | 1.00 | 1.00 |
-| `return_items` | 0.00 | 0.00 | 0.85 | 0.93 | 0.93 | 0.93 |
-| `lookup_and_report` | 0.32 | 0.00 | 0.10 | 0.72 | 1.00 | 0.82 |
-| `refuse_invalid` | 0.00 | 0.00 | 0.03 | 0.89 | 0.81 | 0.99 |
-| `exchange_items` *(never in RL)* | 0.01 | 0.01 | 0.53 | 0.55 | 0.86 | 0.44 |
+| `cancel_order` | 0.00 | 0.00 | 0.54 | 0.66 | 1.00 | 1.00 |
+| `modify_address` | 0.46 | 0.19 | 0.84 | 1.00 | 1.00 | 1.00 |
+| `return_items` | 0.00 | 0.00 | 0.91 | 1.00 | 1.00 | 1.00 |
+| `lookup_and_report` | 0.32 | 0.01 | 0.10 | 0.70 | 1.00 | 0.84 |
+| `refuse_invalid` | 0.00 | 0.00 | 0.00 | 0.87 | 0.74 | 0.99 |
+| `exchange_items` *(never in RL)* | 0.01 | 0.01 | 0.59 | 0.55 | 0.83 | 0.38 |
+
+Per-family cells carry a run-to-run standard deviation of about **±0.05** and the headline
+about **±0.01**, measured directly by evaluating all six checkpoints twice (§5). Differences
+smaller than that are noise, which is why the `exchange_items` regression under long training
+is called out below and the `cancel_order` gap between the two 30-step arms is not.
 
 Every episode is also bucketed by the **first** thing that went wrong, so the columns are
 mutually exclusive and sum to 100% (`scripts/error_taxonomy.py`):
 
 | Failure mode | Base | + SFT | RL only (30) | SFT+RL (30) | RL only (200) | SFT+RL (200) |
 |---|---|---|---|---|---|---|
-| no tool call | 13.8% | 49.8% | – | – | 0.6% | – |
-| malformed / unknown tool | – | 0.2% | – | 0.3% | – | – |
-| illegal write | 5.0% | 0.2% | 18.0% | 2.1% | 4.7% | 2.4% |
-| stopped early | 67.2% | 38.2% | 12.8% | 6.3% | 0.1% | 0.9% |
-| ran out of turns | – | 0.2% | – | 0.1% | – | 0.0% |
-| acted, reported badly | – | 7.8% | 15.2% | 11.4% | 1.2% | 10.4% |
-| reported, acted badly | – | – | 5.1% | 0.0% | – | – |
-| other | – | – | – | 0.3% | – | – |
-| **solved** | **14.0%** | **3.7%** | **48.9%** | **79.4%** | **93.5%** | **86.2%** |
+| no tool call | 13.8% | 50.4% | – | – | 0.7% | – |
+| malformed / unknown tool | – | 0.2% | – | 0.4% | – | – |
+| illegal write | 4.6% | 0.0% | 18.5% | 2.3% | 6.5% | 2.8% |
+| stopped early | 68.2% | 39.3% | 12.0% | 6.5% | – | 0.9% |
+| ran out of turns | – | 0.0% | – | 0.2% | – | 0.1% |
+| acted, reported badly | – | 6.6% | 14.2% | 10.2% | – | 9.5% |
+| reported, acted badly | 0.1% | – | 5.7% | 0.1% | – | – |
+| other | – | – | – | 0.5% | – | – |
+| **solved** | **13.2%** | **3.5%** | **49.6%** | **79.8%** | **92.9%** | **86.8%** |
 
 Bucket meanings: **no tool call** answered from the prompt alone; **illegal write** called a
 write the policy or order state forbids; **stopped early** answered with oracle actions
 outstanding; **acted, reported badly** reached the right state without telling the user the
 required facts; **reported, acted badly** said the right thing without making it true.
 
-**The highest score in these tables belongs to the worst agent.** RL only (200) reaches 0.935
-by discovering that the policy is unscored: it skips user identification in 98.2% of write
+**The highest score in these tables belongs to the worst agent.** RL only (200) reaches 0.929
+by discovering that the policy is unscored: it skips user identification in 98.4% of write
 episodes and fires the write directly using the id leaked in the prompt. §3.3 is that story.
 Read `looked up before writing` alongside `pass^1` throughout — neither is interpretable
 alone, which is the main methodological lesson of this run.
 
-**One ceiling is not 1.0.** `return_items` sits at exactly 0.93 in three separate arms, which
-is too stable to be a model property. It is not: 7 of its 100 test seeds are **unsatisfiable**,
-and §3.4 is that bug. Where a column reads 0.93 for that family, the checkpoint solved
-everything solvable.
+`return_items` reads 1.00 for four arms because 7 of its 100 seeds used to be **unsatisfiable**
+and are now fixed; §3.4 is that bug, and it is the reason these numbers come from a second
+evaluation of every checkpoint rather than the original sweep.
 
 ### 3.1 SFT made the model worse — and it was still worth running
 
-SFT dropped success from 0.140 to **0.037**, for a diagnosable reason. The SFT checkpoint
-stops calling tools — "used a tool at all" falls from 0.86 to 0.50 — and what it does
-instead is ask a question:
+SFT dropped success from 0.132 to **0.035**. Half its episodes never call a tool — "used a
+tool at all" falls from 0.86 to 0.50 — and the failure transcripts show **two** distinct
+causes, both train/serve mismatches inherited from APIGen-MT.
 
-> *"I cannot cancel an order or provide a refund without the user's user ID. Could you
-> please provide me with your user ID so I can verify the order and proceed?"*
+The first is asking instead of acting, in 12 of 16 sampled no-tool episodes:
+
+> *"To assist you with returning the Running Shoes (size 9)… Please provide your user ID so I
+> can proceed."*
 
 That is **correct in APIGen-MT and fatal here.** Those trajectories are collected against a
 user simulator that answers follow-ups, so requesting missing information is rewarded.
 `tau-retail-lite` has no simulator: the instruction is one turn and already contains the email
-`find_user_id_by_email` needs, so asking ends the episode having done nothing. In 8 of 12
-sampled no-tool transcripts the model asks rather than acts; the base model never does. A
-train/serve distribution mismatch, not an optimisation failure — the kind of thing a loss
-curve cannot show and an aggregate cannot explain.
+`find_user_id_by_email` needs, so asking ends the episode having done nothing. The base model
+never does this.
 
-**Judged as a policy, SFT should be deleted. Judged as an initialisation, it is worth +0.305**
-— at matched compute RL reaches 0.489 from scratch and 0.794 from the SFT adapter. Only the
+The second is subtler and only visible in transcripts — the remaining 4 emit a *corrupted tag*:
+
+```
+<function-call>
+{"name": "find_user_id_by_email", "arguments": {"email": "sofia.muller23@example.com"}}
+</tool_call>
+```
+
+The intent, the tool and the arguments are all correct; the opening tag is not the one Qwen3's
+template uses, and the closing tag does not match it. The harness sees no tool call and the
+episode ends. So part of what looks like "SFT taught the model not to act" is really "SFT
+taught the model a different syntax" — a second train/serve mismatch, in the wire format rather
+than the dialogue policy. Neither is an optimisation failure, and neither is visible in a loss
+curve or an aggregate.
+
+**Judged as a policy, SFT should be deleted. Judged as an initialisation, it is worth +0.301**
+— at matched compute RL reaches 0.496 from scratch and 0.797 from the SFT adapter. Only the
 ablation separates those claims.
 
 The mechanism is that **the two stages teach opposite, complementary things.** RL-only learns
-to act, and acts well where acting is the answer (`return_items` 0.85, `modify_address` 0.88).
-What it never learns is restraint: `refuse_invalid` collapses to **0.03**, and
+to act, and acts well where acting is the answer (`return_items` 0.91, `modify_address` 0.84).
+What it never learns is restraint: `refuse_invalid` collapses to **0.00**, and
 `lookup_and_report`, where the correct action is to touch nothing, drops to **0.10**. It acts
 indiscriminately because the environment mostly pays for acting. That is the axis SFT supplies
-— it is over-cautious, asking instead of committing, and its illegal writes fall 25× (0.050 →
-0.002). Composed, the two failure modes cancel.
+— it is over-cautious, asking instead of committing, and its illegal writes fall essentially to
+zero (0.047 → 0.000). Composed, the two failure modes cancel.
 
 ### 3.2 GRPO repaired the failure the diagnosis named
 
-GRPO took 0.037 → **0.794**, fixing precisely what the taxonomy below identified: "no tool
-call" to 0.0%,
-"stopped early" from 38.2% to 6.3%, tool calls per episode from 1.33 to 3.51. The model
-chains. This is the case for online RL in one number — the environment scores what actually
-happens, so a behaviour rewarded by the SFT corpus but useless at deployment is unlearned,
-which more imitation on that corpus could not achieve.
+GRPO took 0.035 → **0.797**, fixing precisely what the taxonomy identified: "no tool call" to
+0.0%, "stopped early" from 39.3% to 6.5%, tool calls per episode from 1.32 to 3.52. The model
+chains, and both SFT pathologies disappear — it acts instead of asking, and it emits the tag
+the harness expects. This is the case for online RL in one number: the environment scores what
+actually happens, so behaviour rewarded by the SFT corpus but useless at deployment gets
+unlearned, which more imitation on that corpus could not achieve.
 
 Longer training (200 steps) sharpened the in-distribution picture and confirmed the
-undertraining diagnosis exactly where it was specific: `cancel_order`, where all 129 failures
-had stopped one call short of the write, went to a clean **1.00**, and overall success rose to
-0.863. But the held-out family **regressed, 0.55 → 0.44**, while every trained family improved
-or held. More steps bought in-distribution accuracy by narrowing the policy. The lever that
-looks cheapest — train longer — degrades the property that made the result credible.
+undertraining diagnosis exactly where it was specific: `cancel_order`, whose failures had all
+stopped one call short of the write, went to a clean **1.00**, and overall success rose to
+0.868. But the held-out family **regressed, 0.55 → 0.38** — a 0.17 drop against a ±0.05 noise
+band, so this one is real — while every trained family improved or held. More steps bought
+in-distribution accuracy by narrowing the policy. The lever that looks cheapest, train longer,
+degrades the property that made the result credible.
 
 ### 3.3 The highest score is a reward hack
 
-Removing the SFT prior and training 200 steps produces the best number in the table, 0.935,
+Removing the SFT prior and training 200 steps produces the best number in the table, 0.929,
 and the worst agent. It calls the write tool as its first and only action:
 
 ```
@@ -260,9 +280,9 @@ and the worst agent. It calls the write tool as its first and only action:
 ```
 
 One call produces the correct final state, and the write tool returns `refund: 248.4`, which
-satisfies the output check for free. Lookup compliance falls from 0.939 at 30 steps to
-**0.018** at 200 — the policy's first rule, *"Identify the user before acting"*, is skipped in
-98.2% of write episodes.
+satisfies the output check for free. Lookup compliance falls from 0.936 at 30 steps to
+**0.016** at 200 — the policy's first rule, *"Identify the user before acting"*, is skipped in
+98.4% of write episodes.
 
 **Two of my design flaws combined to make this optimal, and both are mine, not the model's.**
 The `easy` instruction leaks every identifier needed — *"The order id is #W3001, current item
@@ -270,7 +290,7 @@ id P1003-0, and I want item id P1003-1"* — so no lookup is ever necessary. And
 scores only final state and reported facts; nothing in it references user identification, so
 a rule stated in the system prompt is worth exactly zero. Given enough steps, RL correctly
 found that the procedure was unpaid and discarded it. It also generalises *better* (held-out
-`exchange_items` 0.86) precisely because "call the write with the id from the prompt" is
+`exchange_items` 0.83) precisely because "call the write with the id from the prompt" is
 simpler and more transferable than the intended procedure.
 
 This reframes SFT a third time: its contribution is not only restraint but **anchoring the
@@ -278,8 +298,8 @@ model to a procedure the reward never pays for**. SFT→RL holds 100% compliance
 200 steps because it started there and no gradient pushed it off. That is a real benefit and
 an accidental one — regularisation toward intent, not something the objective earned.
 
-**So the best genuine agent in this table is SFT+RL at 30 steps (0.794), and everything above
-it is measurement artifact.** Reporting 0.935 as the headline would have been the most
+**So the best genuine agent in this table is SFT+RL at 30 steps (0.797), and everything above
+it is measurement artifact.** Reporting 0.929 as the headline would have been the most
 flattering and least honest reading of the run.
 
 **Caveat on all RL numbers.** GRPO optimises the same reward the harness scores, so RL
@@ -288,10 +308,11 @@ held-out family control for memorising *tasks*, not for objective and metric coi
 
 ### 3.4 A benchmark bug the aggregate hid, and the test that should have caught it
 
-`return_items` reads exactly **0.93** in three independently trained arms. A number that
-stable across different checkpoints is a property of the benchmark, not the model.
+In the original sweep, `return_items` read exactly **0.93** in three independently trained
+arms. A number that stable across different checkpoints is a property of the benchmark, not
+the model.
 
-It is. On 7 of 100 test seeds the task cannot be solved truthfully. An order may list the same
+It was. On 7 of 100 test seeds the task could not be solved truthfully. An order may list the same
 `item_id` on more than one line — **7.8% of generated orders do** — and
 `return_delivered_order_items` refunds every matching line, while the task asked for a single
 unit price:
@@ -302,9 +323,10 @@ tool returned    : {"refund": 130.0}          # the order lists it twice
 ```
 
 The agent reports 130.0, which is what the environment told it and what actually happened, and
-is scored wrong. 28 of 2,400 episodes (1.2%) were unwinnable, and `return_items` was capped at
-0.93 — so the three arms reading 0.93 had solved **everything solvable**, and the "28 residual
-failures" in the decomposition below are not model errors at all.
+was scored wrong. 28 of 2,400 episodes (1.2%) were unwinnable, capping `return_items` at 0.93 —
+so those three arms had solved **everything solvable**. With the tasks repaired the family
+reads a clean **1.00** for four arms, exactly the predicted +0.07, and it contributes no
+residual failures at all to §3.5.
 
 **The existing oracle test could never have caught it,** which is the more useful lesson. It
 builds the oracle's reply out of `required_outputs` itself:
@@ -318,8 +340,7 @@ So the output half of `test_oracle_gets_full_reward` asserts that a string built
 `required_outputs` contains `required_outputs`. It tests the matcher against itself and never
 against the environment — green on a task no agent can pass. The replacement,
 `test_required_facts_are_obtainable_from_the_tools`, scores the **actual tool return values**
-over the full evaluation split, and fails loudly on the seed above. Both the fix and the test
-are in this commit; **the numbers above predate the fix** and are left as measured.
+over the full evaluation split, and fails loudly on the seed above.
 
 The generalisable form: a fixture derived from the thing under test proves nothing. The oracle
 test looked like the most load-bearing test in the repo — its own docstring says so — and half
@@ -332,52 +353,48 @@ r_output` failed:
 
 | | SFT+RL (30) | SFT+RL (200) | RL only (200) |
 |---|---|---|---|
-| total failures | 494 (20.6%) | 330 (13.8%) | 157 (6.5%) |
-| state right, **report** wrong | 55.3% | 75.8% | 17.8% |
-| report right, **state** wrong | 36.6% | 14.2% | 52.2% |
-| neither | 8.1% | 10.0% | 29.9% |
+| total failures | 486 (20.2%) | 318 (13.2%) | 171 (7.1%) |
+| state right, **report** wrong | 50.2% | 71.7% | – |
+| report right, **state** wrong | 40.3% | 15.7% | 62.0% |
+| neither | 9.5% | 12.6% | 38.0% |
 
-For the best genuine agent, **the majority of what remains is reporting, not acting** — it
-does the job and then fails to say the required number. That is a much cheaper problem than
-tool selection, and it is concentrated: of its 494 failures, 181 are `exchange_items` (the
-held-out family), 129 `cancel_order`, 111 `lookup_and_report`, and 28 are the dead
-`return_items` tasks from §3.4. Longer training pushed the mix further toward reporting
-(75.8%), which is consistent with RL fixing execution first.
+For the best genuine agent, **the largest share of what remains is reporting, not acting** — it
+does the job and then fails to say the required fact. That is a cheaper problem than tool
+selection, and it is concentrated: of its 486 failures, 179 are `exchange_items` (the held-out
+family), 137 `cancel_order`, 118 `lookup_and_report` and 52 `refuse_invalid`. Longer training
+pushes the mix further toward reporting (71.7%), consistent with RL fixing execution first.
+If reporting were perfect this checkpoint would score **0.899**; if actions were perfect,
+0.879. Reporting is the larger lever.
 
-RL only (200) inverts this — half its failures are *state* wrong with the report correct,
-the signature of an agent that says the right thing without reliably making it true, which is
-the same disposition as the §3.3 shortcut.
+RL only (200) inverts this completely — **none** of its failures are reporting failures, and
+62% are state-wrong-report-right: an agent that says the right thing without reliably making it
+true, the same disposition as the §3.3 shortcut.
 
-**A harness hypothesis, tested and wrong.** The largest single bucket above is 134
-`exchange_items` episodes with `r_progress` 1.0 and `r_output` 0 — executed perfectly, scored
-zero on reporting. The output matcher is a substring test that demanded the leading `#`, so
-*"Your order W3006 has been exchanged"* failed, and an order id is the entire required output
-of two families. That is a real defect and worth fixing on its own terms. It was also an
-attractive explanation, so it got measured rather than assumed: ids now accept both
-renderings (`_order_id_variants`, pinned by a test), and the arm was re-run.
+**A harness hypothesis, tested and wrong.** The largest bucket is `exchange_items` episodes
+with `r_progress` 1.0 and `r_output` 0 — executed perfectly, scored zero on reporting. The
+output matcher is a substring test that demanded the leading `#`, so *"Your order W3006 has
+been exchanged"* failed, and an order id is the entire required output of two families. A real
+defect, worth fixing on its own terms, and an attractive explanation — so it was measured
+rather than assumed. Ids now accept both renderings (`_order_id_variants`, pinned by a test).
+`exchange_items` moved **0.547 → 0.552**, well inside the ±0.05 noise band. The hypothesis is
+falsified; the `#` was not the problem.
 
-| | before | after | |
-|---|---|---|---|
-| `return_items` | 0.930 | **1.000** | the §3.4 dead tasks, exactly as predicted |
-| `exchange_items` | 0.547 | 0.532 | **unchanged — hypothesis falsified** |
-| pass^1 | 0.794 | 0.802 | +0.007, all of it from §3.4 |
+The transcripts show what is. Asked to *"Confirm the order id when done"*, the model executes
+the exchange correctly and then confirms the **item** ids instead, adding a $120.00 "refund"
+that an exchange does not produce. A genuine instruction-following failure, not a formatting
+artifact — and one that only became visible because the transcript sampler was fixed at the
+same time. It had been saving `results[:12]`, which was three families at one seed and all of
+them passes: a file whose entire purpose is explaining failures, containing none. The reporting
+shaping term is the right lever, and loosening the matcher further would have buried this.
 
-The `#` was not the problem. With failure transcripts now saved (they previously sampled the
-first twelve episodes, which were all passes — the file could not answer the one question it
-existed for), the actual behaviour is visible: asked to *"Confirm the order id when done"*,
-the model executes the exchange correctly and then confirms the **item** ids instead, adding a
-$120.00 "refund" that an exchange does not produce. It is a genuine instruction-following
-failure, not a formatting artifact. The reporting shaping term is therefore the right lever,
-and loosening the matcher further would only have hidden this.
-
-**How the RL target was chosen in the first place.** An aggregate of 0.140 says a checkpoint is
+**How the RL target was chosen in the first place.** An aggregate of 0.132 says a checkpoint is
 bad, not what to fix. The informative entry for the base model is what is *absent*: malformed
-calls and hallucinated tools are **0%**, and no episode hit the turn limit — all 2,400 ended
+calls and hallucinated tools are **0%**, and **no episode hit the turn limit** — all 2,400 ended
 because the model chose to answer. It is not that it cannot spell a tool call; it does not take
-enough turns. Among the 1,792 early stops `r_progress` is `0.0` in *every one*, so outcomes are
-near-bimodal — whole task or nothing, the regime where group-relative advantage collapses. The
-taxonomy named premature termination, and that is exactly the metric RL moved: "stopped early"
-67.2% → 6.3%, "no tool call" 13.8% → 0%.
+enough turns. Of the 2,083 failures that ended in an answer, 86.8% have `r_progress` exactly
+`0.0`, so outcomes are near-bimodal — whole task or nothing, the regime where group-relative
+advantage collapses. The taxonomy named premature termination, and that is exactly what RL
+moved: "stopped early" 68.2% → 6.5%, "no tool call" 13.8% → 0%.
 
 ---
 
@@ -416,11 +433,10 @@ changed the design:
 - **The reward scores outcomes, not conduct.** State plus reported facts is verifiable and
   cheap, but a policy rule that is never scored is a suggestion. Any rule that matters must
   appear in the reward, not only in the system prompt.
-- **1.2% of evaluation episodes were unwinnable** (§3.4), capping `return_items` at 0.93. The
-  bug is fixed and pinned by a test, but every number in this document was measured before the
-  fix, so the reported ceiling is 0.988 rather than 1.0 and `return_items` rows understate
-  three arms by 0.07. I chose not to re-run: it would cost another full sweep to move numbers
-  I can correct in prose, and re-measuring only some arms would break comparability.
+- **1.2% of evaluation episodes were unwinnable** (§3.4). Fixed, pinned by a test, and all six
+  arms re-evaluated on the corrected metric, so every number here is comparable — but that
+  correction was found only because one family sat at a suspiciously stable 0.93. I have no
+  guarantee a similar defect is not still present in a family whose numbers look unremarkable.
 - **The headline benchmark is one I wrote.** Train and test share no database and one task
   family is held out of RL entirely, which controls for memorisation but not for the
   environment being easier, or differently shaped, than a real benchmark.
@@ -431,10 +447,13 @@ changed the design:
 - **RL is trained on the eval metric.** GRPO optimises the same grounded reward the harness
   scores. Disjoint seeds and a held-out family rule out memorising tasks, but not the
   objective and the metric being the same function. Base and SFT get no such advantage, so
-  the 0.140 → 0.794 comparison is not between equals.
-- **Single seed, one run per arm.** No error bars, and 2,400 episodes per checkpoint constrain
-  sampling noise but say nothing about run-to-run variance in training. The SFT-as-prior
-  result (+0.305) rests on one pair of runs.
+  the 0.132 → 0.797 comparison is not between equals.
+- **Evaluation noise is now measured; training noise is not.** Every checkpoint was evaluated
+  twice (the §3.4 fix forced a re-baseline), which gives a direct estimate: **±0.01 on the
+  headline, ±0.05 per family** (mean |delta| 0.005 and 0.016, max 0.068). Differences smaller
+  than that are not real, and I have tried to avoid claiming any. This says nothing about
+  *training* variance — each arm was trained once, so the SFT-as-prior result (+0.301) rests
+  on a single pair of runs.
 - **The SFT stage is under-trained.** 63 steps over 1,000 trajectories, at batch size 1, is
   small. The regression in §3.1 is explained by a specific verifiable behaviour rather than by
   undertraining, but more SFT might have changed its sign, and that was not tested.
@@ -476,7 +495,7 @@ Ordered by expected value, not by effort.
    intervention; more turns is not.
 5. **Run BFCL multi-turn** on every checkpoint, plus real τ-bench with an LLM user
    simulator, to find out whether any of this transfers off-distribution. This is the check
-   that would let the 0.794 be described as tool use rather than as this environment.
+   that would let the 0.797 be described as tool use rather than as this environment.
 6. **Ablate the reward.** Every shaping term in §2 is a *claim* backed by construction and a
    unit test, not by measurement. Drop each in turn and watch both final success and whether
    the term induces hacking — §3.3 shows construction and unit tests are not enough to catch

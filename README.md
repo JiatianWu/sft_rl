@@ -15,24 +15,26 @@ Task success on 2,400 held-out episodes per checkpoint, identical decoding throu
 
 | | Base | + SFT | RL only (30) | SFT+RL (30) | RL only (200) | SFT+RL (200) |
 |---|---|---|---|---|---|---|
-| **pass^1** | 0.140 | 0.037 | 0.489 | **0.794** | *0.935* | 0.863 |
-| **looked up before writing** | 0.13 | 0.42 | 0.94 | **1.00** | **0.02** | **1.00** |
-| illegal writes / episode | 0.050 | 0.002 | 0.185 | 0.171 | 0.221 | 0.189 |
+| **pass^1** | 0.132 | 0.035 | 0.496 | **0.797** | *0.929* | 0.868 |
+| **looked up before writing** | 0.14 | 0.42 | 0.94 | **1.00** | **0.02** | **1.00** |
+| illegal writes / episode | 0.047 | 0.000 | 0.186 | 0.169 | 0.240 | 0.193 |
 
 Three findings, none visible from the headline number alone:
 
-- **SFT hurt** (0.140 → 0.037) — APIGen-MT teaches it to ask a user simulator for missing
+- **SFT hurt** (0.132 → 0.035) — APIGen-MT teaches it to ask a user simulator for missing
   information, and this environment has none, so half of SFT episodes make no tool call.
-- **SFT is still worth +0.305 as an RL prior.** At matched compute RL reaches 0.489 from
-  scratch and 0.794 from the SFT adapter. Worthless as a policy, decisive as an initialisation.
-- **The top score, 0.935, is a reward hack.** RL-only at 200 steps skips user identification
-  in 98.2% of write episodes and fires the write with the id leaked in the prompt. The best
-  genuine agent is **SFT+RL at 30 steps, 0.794**.
+- **SFT is still worth +0.301 as an RL prior.** At matched compute RL reaches 0.496 from
+  scratch and 0.797 from the SFT adapter. Worthless as a policy, decisive as an initialisation.
+- **The top score, 0.929, is a reward hack.** RL-only at 200 steps skips user identification
+  in 98.4% of write episodes and fires the write with the id leaked in the prompt. The best
+  genuine agent is **SFT+RL at 30 steps, 0.797**.
 
-A fourth finding came out of the tables rather than the models: `return_items` reads exactly
+A fourth finding came out of the tables rather than the models: `return_items` read exactly
 0.93 in three independently trained arms, which turned out to be a benchmark bug making 1.2%
-of episodes unwinnable — and the test meant to prevent exactly that was circular. Fixed and
-pinned; reported numbers predate the fix. [WRITEUP.md](WRITEUP.md) §3.4.
+of episodes unwinnable — and the test meant to prevent exactly that was circular. Both are
+fixed and pinned, and all six arms were then re-evaluated on the corrected metric.
+Re-evaluating twice also gives real error bars: **±0.01 headline, ±0.05 per family**.
+[WRITEUP.md](WRITEUP.md) §3.4.
 
 ## The loop
 

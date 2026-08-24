@@ -282,6 +282,49 @@ def finish(sft_limit: int = 1000, grpo_steps: int = 30, n_seeds: int = 100, tria
     print("\n[finish] all four stages complete", flush=True)
 
 
+@app.function(gpu=GPU, volumes=VOLUMES, timeout=4 * HOURS)
+def rebaseline(n_seeds: int = 100, trials: int = 4) -> None:
+    """Re-evaluate every checkpoint on the current metric, in one container.
+
+    Two scoring bugs were fixed after the original sweep: `return_items` had 7 unsatisfiable
+    seeds, and order ids were only accepted with a leading `#`. Fixing them shifts every arm
+    by roughly +0.01, which changes no conclusion — but leaving five arms on the old metric
+    and one on the new means the headline table silently compares two different rulers.
+
+    Re-running all six also produces failure transcripts for every arm under the corrected
+    sampler. The originals sampled `results[:12]`, which turned out to be all passes, so the
+    qualitative claims about *why* base and SFT fail rest on weaker evidence than the rest.
+
+    One container: the base weights download once and the HF cache is shared, which is most of
+    the wall clock. Results are committed after each arm so an interruption costs one arm.
+    """
+    import subprocess
+
+    arms = [
+        ("base", None),
+        ("sft", "/work/checkpoints/sft"),
+        ("rl_only", "/work/checkpoints/rl_only"),
+        ("grpo", "/work/checkpoints/grpo"),
+        ("rl_only_long", "/work/checkpoints/rl_only_long"),
+        ("grpo_long", "/work/checkpoints/grpo_long"),
+    ]
+    for index, (tag, adapter) in enumerate(arms, start=1):
+        print(f"\n{'=' * 70}\n[rebaseline] {index}/{len(arms)}: {tag}\n{'=' * 70}", flush=True)
+        command = [
+            "python", "-m", "tooluse.eval.run_eval",
+            "--tag", tag,
+            "--n-seeds", str(n_seeds),
+            "--trials", str(trials),
+            "--out", "/work/results",
+        ]
+        if adapter:
+            command += ["--adapter", adapter]
+        subprocess.run(command, check=True)
+        workspace.commit()
+        print(f"[rebaseline] {tag} committed", flush=True)
+    print("\n[rebaseline] all six arms re-evaluated on one metric", flush=True)
+
+
 @app.function(gpu=GPU, volumes=VOLUMES, timeout=5 * HOURS)
 def rl_arm(
     tag: str,
