@@ -17,6 +17,7 @@ from .db import (
     DELIVERED,
     PENDING,
     WRITE_ACTIONS,
+    _money,
     apply_action,
     build_db,
     db_hash,
@@ -110,7 +111,11 @@ def sample_task(seed: int, family: str | None = None, difficulty: str = "easy") 
         oracle = [
             {"name": "return_delivered_order_items", "args": {"order_id": order_id, "item_ids": [item["item_id"]]}}
         ]
-        required = [_number_variants(item["price"])]
+        # An order can list the same item_id on more than one line (7.8% of orders do), and the
+        # tool refunds *every* matching line. Requiring a single unit price made those tasks
+        # unsatisfiable: the agent truthfully reports what the tool returned and is marked wrong.
+        refund = _money(sum(i["price"] for i in order["items"] if i["item_id"] == item["item_id"]))
+        required = [_number_variants(refund)]
         instruction = (
             f"I want to return the {item['name']} ({item['option']}) from a delivered order. "
             f"My email is {user['email']}. How much will I get back?"

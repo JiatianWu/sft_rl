@@ -171,11 +171,36 @@ so they differ from the SFT arms in initialisation alone.
 | `refuse_invalid` | 0.00 | 0.00 | 0.03 | 0.89 | 0.81 | 0.99 |
 | `exchange_items` *(never in RL)* | 0.01 | 0.01 | 0.53 | 0.55 | 0.86 | 0.44 |
 
-**The highest score in that table belongs to the worst agent.** RL only (200) reaches 0.935
+Every episode is also bucketed by the **first** thing that went wrong, so the columns are
+mutually exclusive and sum to 100% (`scripts/error_taxonomy.py`):
+
+| Failure mode | Base | + SFT | RL only (30) | SFT+RL (30) | RL only (200) | SFT+RL (200) |
+|---|---|---|---|---|---|---|
+| no tool call | 13.8% | 49.8% | – | – | 0.6% | – |
+| malformed / unknown tool | – | 0.2% | – | 0.3% | – | – |
+| illegal write | 5.0% | 0.2% | 18.0% | 2.1% | 4.7% | 2.4% |
+| stopped early | 67.2% | 38.2% | 12.8% | 6.3% | 0.1% | 0.9% |
+| ran out of turns | – | 0.2% | – | 0.1% | – | 0.0% |
+| acted, reported badly | – | 7.8% | 15.2% | 11.4% | 1.2% | 10.4% |
+| reported, acted badly | – | – | 5.1% | 0.0% | – | – |
+| other | – | – | – | 0.3% | – | – |
+| **solved** | **14.0%** | **3.7%** | **48.9%** | **79.4%** | **93.5%** | **86.2%** |
+
+Bucket meanings: **no tool call** answered from the prompt alone; **illegal write** called a
+write the policy or order state forbids; **stopped early** answered with oracle actions
+outstanding; **acted, reported badly** reached the right state without telling the user the
+required facts; **reported, acted badly** said the right thing without making it true.
+
+**The highest score in these tables belongs to the worst agent.** RL only (200) reaches 0.935
 by discovering that the policy is unscored: it skips user identification in 98.2% of write
 episodes and fires the write directly using the id leaked in the prompt. §3.3 is that story.
 Read `looked up before writing` alongside `pass^1` throughout — neither is interpretable
 alone, which is the main methodological lesson of this run.
+
+**One ceiling is not 1.0.** `return_items` sits at exactly 0.93 in three separate arms, which
+is too stable to be a model property. It is not: 7 of its 100 test seeds are **unsatisfiable**,
+and §3.4 is that bug. Where a column reads 0.93 for that family, the checkpoint solved
+everything solvable.
 
 ### 3.1 SFT made the model worse — and it was still worth running
 
@@ -261,15 +286,76 @@ flattering and least honest reading of the run.
 checkpoints are trained on the eval metric in a way base and SFT are not. Disjoint seeds and a
 held-out family control for memorising *tasks*, not for objective and metric coinciding.
 
-**How the target was chosen.** An aggregate of 0.140 says a checkpoint is bad, not what to
-fix, so every episode is bucketed by the first thing that went wrong
-(`scripts/error_taxonomy.py`). The informative entry for the base model is what is *absent*:
-malformed calls and hallucinated tools are **0%**, and no episode hit the turn limit — all
-2,400 ended because the model chose to answer. It cannot be that it fails to spell a tool
-call; it does not take enough turns. Among the 1,792 early stops `r_progress` is `0.0` in
-*every one*, so outcomes are near-bimodal — whole task or nothing, the regime where
-group-relative advantage collapses. The taxonomy named premature termination, and that is
-exactly the metric RL moved.
+### 3.4 A benchmark bug the aggregate hid, and the test that should have caught it
+
+`return_items` reads exactly **0.93** in three independently trained arms. A number that
+stable across different checkpoints is a property of the benchmark, not the model.
+
+It is. On 7 of 100 test seeds the task cannot be solved truthfully. An order may list the same
+`item_id` on more than one line — **7.8% of generated orders do** — and
+`return_delivered_order_items` refunds every matching line, while the task asked for a single
+unit price:
+
+```
+required_outputs : ['65', '65.00']            # one Backpack (grey)
+tool returned    : {"refund": 130.0}          # the order lists it twice
+```
+
+The agent reports 130.0, which is what the environment told it and what actually happened, and
+is scored wrong. 28 of 2,400 episodes (1.2%) were unwinnable, and `return_items` was capped at
+0.93 — so the three arms reading 0.93 had solved **everything solvable**, and the "28 residual
+failures" in the decomposition below are not model errors at all.
+
+**The existing oracle test could never have caught it,** which is the more useful lesson. It
+builds the oracle's reply out of `required_outputs` itself:
+
+```python
+def _oracle_text(env):                       # the old helper
+    return " ".join(alts[0] for alts in env.spec.required_outputs)
+```
+
+So the output half of `test_oracle_gets_full_reward` asserts that a string built from
+`required_outputs` contains `required_outputs`. It tests the matcher against itself and never
+against the environment — green on a task no agent can pass. The replacement,
+`test_required_facts_are_obtainable_from_the_tools`, scores the **actual tool return values**
+over the full evaluation split, and fails loudly on the seed above. Both the fix and the test
+are in this commit; **the numbers above predate the fix** and are left as measured.
+
+The generalisable form: a fixture derived from the thing under test proves nothing. The oracle
+test looked like the most load-bearing test in the repo — its own docstring says so — and half
+of it was circular.
+
+### 3.5 What is actually left to fix
+
+Decomposing the residual failures of each RL arm by which half of `r_outcome = r_action *
+r_output` failed:
+
+| | SFT+RL (30) | SFT+RL (200) | RL only (200) |
+|---|---|---|---|
+| total failures | 494 (20.6%) | 330 (13.8%) | 157 (6.5%) |
+| state right, **report** wrong | 55.3% | 75.8% | 17.8% |
+| report right, **state** wrong | 36.6% | 14.2% | 52.2% |
+| neither | 8.1% | 10.0% | 29.9% |
+
+For the best genuine agent, **the majority of what remains is reporting, not acting** — it
+does the job and then fails to say the required number. That is a much cheaper problem than
+tool selection, and it is concentrated: of its 494 failures, 181 are `exchange_items` (the
+held-out family), 129 `cancel_order`, 111 `lookup_and_report`, and 28 are the dead
+`return_items` tasks from §3.4. Longer training pushed the mix further toward reporting
+(75.8%), which is consistent with RL fixing execution first.
+
+RL only (200) inverts this — half its failures are *state* wrong with the report correct,
+the signature of an agent that says the right thing without reliably making it true, which is
+the same disposition as the §3.3 shortcut.
+
+**How the RL target was chosen in the first place.** An aggregate of 0.140 says a checkpoint is
+bad, not what to fix. The informative entry for the base model is what is *absent*: malformed
+calls and hallucinated tools are **0%**, and no episode hit the turn limit — all 2,400 ended
+because the model chose to answer. It is not that it cannot spell a tool call; it does not take
+enough turns. Among the 1,792 early stops `r_progress` is `0.0` in *every one*, so outcomes are
+near-bimodal — whole task or nothing, the regime where group-relative advantage collapses. The
+taxonomy named premature termination, and that is exactly the metric RL moved: "stopped early"
+67.2% → 6.3%, "no tool call" 13.8% → 0%.
 
 ---
 
@@ -292,6 +378,9 @@ changed the design:
 - **A Modal spend limit is reported as "waiting for capacity",** and it is not the credit
   balance: $1.40 of ~$30 had been spent when everything stopped. Transient scarcity, a dead
   budget and a settings cap all look identical in the logs.
+- **A test whose fixture is derived from the thing under test proves nothing** (§3.4). The
+  most load-bearing assertion in the repo was half circular and stayed green on 28 unsolvable
+  tasks.
 
 ---
 
@@ -305,6 +394,11 @@ changed the design:
 - **The reward scores outcomes, not conduct.** State plus reported facts is verifiable and
   cheap, but a policy rule that is never scored is a suggestion. Any rule that matters must
   appear in the reward, not only in the system prompt.
+- **1.2% of evaluation episodes were unwinnable** (§3.4), capping `return_items` at 0.93. The
+  bug is fixed and pinned by a test, but every number in this document was measured before the
+  fix, so the reported ceiling is 0.988 rather than 1.0 and `return_items` rows understate
+  three arms by 0.07. I chose not to re-run: it would cost another full sweep to move numbers
+  I can correct in prose, and re-measuring only some arms would break comparability.
 - **The headline benchmark is one I wrote.** Train and test share no database and one task
   family is held out of RL entirely, which controls for memorisation but not for the
   environment being easier, or differently shaped, than a real benchmark.
@@ -351,14 +445,21 @@ Ordered by expected value, not by effort.
    filter APIGen-MT to trajectories that never request missing information, or add a scripted
    user to the environment so the behaviour becomes viable instead of fatal. The first is a
    day; the second is more faithful to τ-bench.
-4. **Run BFCL multi-turn** on every checkpoint, plus real τ-bench with an LLM user
+4. **Attack the reporting failures, which are now the majority.** §3.5 shows 55% of the best
+   agent's residual failures are correct-state-wrong-report, and longer training pushes that
+   to 76%. The required fact is always present in a tool result the model already received, so
+   this is a copying failure, not a reasoning one — plausibly addressable by a shaping term on
+   relaying observed values, or simply by more turns.
+5. **Run BFCL multi-turn** on every checkpoint, plus real τ-bench with an LLM user
    simulator, to find out whether any of this transfers off-distribution. This is the check
    that would let the 0.794 be described as tool use rather than as this environment.
-5. **Ablate the reward.** Every shaping term in §2 is a *claim* backed by construction and a
+6. **Ablate the reward.** Every shaping term in §2 is a *claim* backed by construction and a
    unit test, not by measurement. Drop each in turn and watch both final success and whether
    the term induces hacking — §3.3 shows construction and unit tests are not enough to catch
    an exploit that only a long run surfaces.
-6. **Instrument for hacking by default.** The compliance metric that exposed §3.3 was written
+7. **Instrument for hacking by default.** The compliance metric that exposed §3.3 was written
    *after* the run that needed it. Any quantity the reward does not score but the task
    requires should be logged from the first evaluation, and a rising success rate paired with
    a falling call count should be treated as an alarm rather than progress.
+8. **Audit every fixture for circularity** (§3.4). One test was building its input from the
+   thing it verified; I have not checked the rest of the suite for the same shape.

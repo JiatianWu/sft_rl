@@ -48,6 +48,25 @@ in `tests/test_masking.py` so it cannot widen unnoticed.
 assistant turns — the only tokens carrying loss. At 8k, 97% fit. Even then only ~11% of
 tokens contribute to the objective.
 
+## Tests that cannot fail
+
+**A fixture derived from the thing under test proves nothing.** `test_oracle_gets_full_reward`
+is the most load-bearing test in the repo — its docstring says an unsolvable task makes every
+RL number meaningless — and half of it was circular. The oracle's reply was built by joining
+`required_outputs` together, then asserted to contain `required_outputs`. That checks the
+substring matcher against itself and never against the environment, so it stayed green while
+28 evaluation episodes were unwinnable.
+
+The bug it hid: an order can list the same `item_id` on several lines (7.8% of generated
+orders), `return_delivered_order_items` refunds every matching line, but the task required a
+single unit price — so the agent reported the tool's own number, 130.0 against a required 65,
+and was scored wrong. `test_required_facts_are_obtainable_from_the_tools` now scores the actual
+tool return values across the full evaluation split, and fails on seed 100024 without the fix.
+
+Worth noting the aggregate never showed it. What showed it was `return_items` reading exactly
+0.93 in three independently trained arms — a number too stable across different checkpoints to
+be a property of any of them.
+
 ## Running on a metered free tier
 
 **H100/A100/L40S all require a payment method**, so everything ran on an **A10**. That image

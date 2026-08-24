@@ -29,7 +29,10 @@ Three findings, none visible from the headline number alone:
   in 98.2% of write episodes and fires the write with the id leaked in the prompt. The best
   genuine agent is **SFT+RL at 30 steps, 0.794**.
 
-Full analysis in [WRITEUP.md](WRITEUP.md) §3.
+A fourth finding came out of the tables rather than the models: `return_items` reads exactly
+0.93 in three independently trained arms, which turned out to be a benchmark bug making 1.2%
+of episodes unwinnable — and the test meant to prevent exactly that was circular. Fixed and
+pinned; reported numbers predate the fix. [WRITEUP.md](WRITEUP.md) §3.4.
 
 ## The loop
 

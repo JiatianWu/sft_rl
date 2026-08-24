@@ -11,18 +11,21 @@ import pytest
 
 from tooluse.env import FAMILIES, RetailEnv, RewardConfig, compute_reward, sample_task
 from tooluse.env.db import WRITE_ACTIONS, db_hash
+from tooluse.env.splits import TEST_SEEDS
 
 SEEDS = list(range(40))
 CONFIG = RewardConfig()
 
 
-def _run_oracle(env: RetailEnv) -> None:
+def _run_oracle(env: RetailEnv) -> list[str]:
     """Execute the task's oracle actions through the environment's public tools."""
+    observed = []
     for action in env.spec.oracle_actions:
         args = dict(action["args"])
         if action["name"] == "transfer_to_human":
             args = {"summary": "policy does not allow this request"}
-        getattr(env, action["name"])(**args)
+        observed.append(getattr(env, action["name"])(**args))
+    return observed
 
 
 def _oracle_text(env: RetailEnv) -> str:
@@ -58,6 +61,33 @@ def test_oracle_gets_full_reward(family: str) -> None:
         assert scores["r_progress"] == 1.0
         assert scores["p_violation"] == 0.0, f"{family}/{seed}: oracle triggered a violation"
         assert scores["reward"] == pytest.approx(CONFIG.w_outcome + CONFIG.w_progress)
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_required_facts_are_obtainable_from_the_tools(family: str) -> None:
+    """The facts the reward demands must appear in what the tools actually returned.
+
+    `test_oracle_gets_full_reward` cannot catch this: it builds the oracle's reply out of
+    `required_outputs` itself, so the output half of that assertion is a tautology. It checks
+    the matcher against itself, never against the environment.
+
+    The gap was real. An order may list the same `item_id` on several lines and
+    `return_delivered_order_items` refunds all of them, while the task required a single unit
+    price — so on 7 of 100 test seeds the agent reported the tool's own number and was scored
+    wrong. Those tasks were unsatisfiable, which capped `return_items` at 0.93 for every
+    checkpoint. Run over the *evaluation* seeds, since that is where a dead task does damage.
+    """
+    for seed in TEST_SEEDS:
+        env = RetailEnv()
+        env.reset(seed=seed, family=family, difficulty="easy")
+        if not env.spec.oracle_actions or not env.spec.required_outputs:
+            continue  # read-only family: the fact comes from a read the agent chooses
+        observed = " ".join(_run_oracle(env))
+        for alternatives in env.spec.required_outputs:
+            assert any(value in observed for value in alternatives), (
+                f"{family}/{seed}: reward requires one of {alternatives}, but the oracle's "
+                f"tools returned {observed!r} — the task cannot be solved truthfully"
+            )
 
 
 @pytest.mark.parametrize("family", FAMILIES)
