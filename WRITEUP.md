@@ -447,9 +447,11 @@ Ordered by expected value, not by effort.
    day; the second is more faithful to τ-bench.
 4. **Attack the reporting failures, which are now the majority.** §3.5 shows 55% of the best
    agent's residual failures are correct-state-wrong-report, and longer training pushes that
-   to 76%. The required fact is always present in a tool result the model already received, so
-   this is a copying failure, not a reasoning one — plausibly addressable by a shaping term on
-   relaying observed values, or simply by more turns.
+   to 76%. In all 273 such episodes `r_progress` is 1.0, so the model had already executed the
+   task and held the fact it failed to relay — a copying failure, not a reasoning one. It is
+   **not** a budget problem: only 2 of 494 failures hit the turn limit, and failures average
+   4.41 turns against 4.55 for successes. A shaping term on relaying observed values is the
+   intervention; more turns is not.
 5. **Run BFCL multi-turn** on every checkpoint, plus real τ-bench with an LLM user
    simulator, to find out whether any of this transfers off-distribution. This is the check
    that would let the 0.794 be described as tool use rather than as this environment.
