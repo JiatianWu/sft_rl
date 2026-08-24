@@ -63,6 +63,30 @@ def test_oracle_gets_full_reward(family: str) -> None:
         assert scores["reward"] == pytest.approx(CONFIG.w_outcome + CONFIG.w_progress)
 
 
+@pytest.mark.parametrize("family", ["modify_address", "exchange_items"])
+def test_order_id_is_accepted_however_a_human_would_write_it(family: str) -> None:
+    """Reporting the right order id must not depend on punctuation.
+
+    An order id is the entire required output of these two families — a third of the eval
+    split — and the matcher used to demand the leading `#`, so a correct sentence scored zero
+    for writing `W3006`. Formatting should never decide a grounded reward; money already had
+    variants and ids did not.
+    """
+    from tooluse.env.reward import check_outputs
+
+    spec = sample_task(100003, family, "easy")
+    order_id = spec.required_outputs[0][-1]  # the bare form
+    assert not order_id.startswith("#")
+    for phrasing in (
+        f"Your order #{order_id} has been updated.",
+        f"Your order {order_id} has been updated.",
+        f"Order ID: {order_id} — done.",
+        f"i've updated order {order_id.lower()}.",
+    ):
+        assert check_outputs(spec.required_outputs, phrasing), phrasing
+    assert not check_outputs(spec.required_outputs, "All done, let me know if you need anything.")
+
+
 @pytest.mark.parametrize("family", FAMILIES)
 def test_required_facts_are_obtainable_from_the_tools(family: str) -> None:
     """The facts the reward demands must appear in what the tools actually returned.

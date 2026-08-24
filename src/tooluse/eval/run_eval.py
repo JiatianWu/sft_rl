@@ -146,9 +146,29 @@ def main() -> None:
                 )
                 + "\n"
             )
-    # A handful of full transcripts, because aggregate numbers never explain a failure.
+    # Full transcripts, because aggregate numbers never explain a failure. Sample *failures*
+    # per family rather than taking `results[:12]`: that slice was 12 episodes of three
+    # families at one seed, all of which happened to pass, so the one question the file exists
+    # to answer — why did this episode fail — could not be answered from it at all.
+    by_family: dict[str, list] = {}
+    for result in sorted(results, key=lambda r: r.scores["r_outcome"]):
+        by_family.setdefault(result.family, []).append(result)
+    sampled = [r for group in by_family.values() for r in group[:4]]
     with (args.out / f"{args.tag}_transcripts.json").open("w") as handle:
-        json.dump([{"family": r.family, "seed": r.seed, "messages": r.messages} for r in results[:12]], handle, indent=2)
+        json.dump(
+            [
+                {
+                    "family": r.family,
+                    "seed": r.seed,
+                    "scores": r.scores,
+                    "stopped_reason": r.stopped_reason,
+                    "messages": r.messages,
+                }
+                for r in sampled
+            ],
+            handle,
+            indent=2,
+        )
 
     print(json.dumps({k: v for k, v in summary.items() if k != "per_family_success"}, indent=2))
     print("per-family success:", json.dumps(summary["per_family_success"], indent=2))

@@ -44,6 +44,20 @@ def _number_variants(value: float) -> list[str]:
     return sorted(variants)
 
 
+def _order_id_variants(order_id: str) -> list[str]:
+    """Acceptable renderings of an order id.
+
+    Money already had this; ids did not, so `"Your order W3006 has been exchanged."` scored
+    zero for omitting a `#`. That is a correct answer by any standard a user would apply, and
+    it is not a rare edge: an order id is the *entire* required output of both
+    `modify_address` and `exchange_items`, a third of the evaluation split.
+
+    Matching stays a substring test, so the bare form is the permissive one and the `#` form
+    is redundant — it is kept so the accepted set is readable rather than implied.
+    """
+    return sorted({order_id, order_id.lstrip("#")})
+
+
 @dataclass
 class TaskSpec:
     family: str
@@ -95,7 +109,7 @@ def sample_task(seed: int, family: str | None = None, difficulty: str = "easy") 
         user = db["users"][order["user_id"]]
         new = {"address1": "742 Evergreen Terrace", "city": "Portland", "state": "OR", "zip": "97201"}
         oracle = [{"name": "modify_pending_order_address", "args": {"order_id": order_id, **new}}]
-        required = [[order_id]]
+        required = [_order_id_variants(order_id)]
         instruction = (
             f"Hello, I moved and need the delivery address changed on my pending order. "
             f"My email is {user['email']}. The new address is {new['address1']}, "
@@ -143,7 +157,7 @@ def sample_task(seed: int, family: str | None = None, difficulty: str = "easy") 
                 },
             }
         ]
-        required = [[order_id]]
+        required = [_order_id_variants(order_id)]
         instruction = (
             f"I'd like to exchange the {item['name']} ({item['option']}) I received for the "
             f"{new_item['option']} version. My email is {user['email']}. Confirm the order id when done."

@@ -348,6 +348,28 @@ RL only (200) inverts this — half its failures are *state* wrong with the repo
 the signature of an agent that says the right thing without reliably making it true, which is
 the same disposition as the §3.3 shortcut.
 
+**A harness hypothesis, tested and wrong.** The largest single bucket above is 134
+`exchange_items` episodes with `r_progress` 1.0 and `r_output` 0 — executed perfectly, scored
+zero on reporting. The output matcher is a substring test that demanded the leading `#`, so
+*"Your order W3006 has been exchanged"* failed, and an order id is the entire required output
+of two families. That is a real defect and worth fixing on its own terms. It was also an
+attractive explanation, so it got measured rather than assumed: ids now accept both
+renderings (`_order_id_variants`, pinned by a test), and the arm was re-run.
+
+| | before | after | |
+|---|---|---|---|
+| `return_items` | 0.930 | **1.000** | the §3.4 dead tasks, exactly as predicted |
+| `exchange_items` | 0.547 | 0.532 | **unchanged — hypothesis falsified** |
+| pass^1 | 0.794 | 0.802 | +0.007, all of it from §3.4 |
+
+The `#` was not the problem. With failure transcripts now saved (they previously sampled the
+first twelve episodes, which were all passes — the file could not answer the one question it
+existed for), the actual behaviour is visible: asked to *"Confirm the order id when done"*,
+the model executes the exchange correctly and then confirms the **item** ids instead, adding a
+$120.00 "refund" that an exchange does not produce. It is a genuine instruction-following
+failure, not a formatting artifact. The reporting shaping term is therefore the right lever,
+and loosening the matcher further would only have hidden this.
+
 **How the RL target was chosen in the first place.** An aggregate of 0.140 says a checkpoint is
 bad, not what to fix. The informative entry for the base model is what is *absent*: malformed
 calls and hallucinated tools are **0%**, and no episode hit the turn limit — all 2,400 ended
