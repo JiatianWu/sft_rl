@@ -94,9 +94,12 @@ cap and is the right fix either way, but diagnosing it as an exhausted balance w
 looking for a new account instead of a settings change. Check `modal billing summary` before
 believing any story about why a job will not schedule.
 
-**The whole project cost $2.08**, of which $1.91 was A10 GPU time — and roughly $0.57 of that
-was burned by the preempted SFT run and a stopped ablation. The four stages that produced the
-reported numbers cost $0.89 together.
+**The whole project metered $4.75 and was billed $0.00**, credits covering all of it — about
+16% of the ~$30. A10 GPU time was $4.32 of that (91%), CPU $0.33, memory $0.08, volumes $0.02.
+The four stages that produced the headline SFT→GRPO result cost well under a dollar together;
+most of the total went on the four ablation arms added afterwards, the two 200-step runs being
+roughly 4× a 30-step run. Re-running the full six-arm evaluation costs about $1, which is the
+relevant number when deciding whether a metric change is worth re-baselining for.
 
 **Checkpoint per stage, not per pipeline.** The eviction cost the entire SFT run, because
 the adapter is only written at the end. Worse, splitting the pipeline across four Modal
