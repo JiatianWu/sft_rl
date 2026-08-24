@@ -505,6 +505,73 @@ spending. A result reported as "SFT → RL took a 0.6B model from 0.13 to 0.80 o
 use" would have been true and badly misleading. That is the single strongest argument in this
 project for running an external benchmark you did not write.
 
+### 3.7 Fixing the parallel collapse, and what it cost
+
+§3.6 offered a narrow explanation for `parallel` reading 0/200: the model was never shown two
+calls in one turn. The duller competing explanation is that LoRA SFT at this scale degrades the
+model broadly and parallel calling is simply what breaks first. Those predict different things,
+so the corpus was changed and nothing else.
+
+`sft_mixed` trains on 500 APIGen-MT trajectories plus 500 from
+NousResearch/hermes-function-calling-v1, which supplies exactly what APIGen lacks — 56.8% of its
+tool-calling turns carry more than one call, across 35 domains rather than one. Total
+trajectories stay at 1,000, matching the `sft` arm, so composition is the only variable. xLAM was
+the first choice and is gated; ToolACE encodes calls as a bracketed DSL with spaces in function
+names. Hermes needs neither a token nor a bespoke parser, and already uses the `<tool_call>` JSON
+Qwen3's template emits. Predictions were committed before training (`BFCL_PREREGISTRATION.md`).
+
+| | Base | + SFT | **SFT mixed** |
+|---|---|---|---|
+| `simple_python` | 0.855 | 0.675 | 0.792 |
+| `multiple` | 0.850 | 0.505 | 0.760 |
+| `parallel` | 0.725 | **0.000** | **0.705** |
+| `parallel_multiple` | 0.750 | **0.000** | **0.590** |
+| **AST pooled** | **0.807** | **0.371** | **0.728** |
+
+**The explanation holds.** `parallel` goes 0.000 → 0.705 against base's 0.725, and pooled AST
+recovers 0.357 of the 0.436 that SFT destroyed — about 82% of the damage, from changing nothing
+but which trajectories the model read. The failure was never capacity or general forgetting; it
+was a missing demonstration. 284 multi-call trajectories, 12.9% of the corpus's tool-calling
+turns, were enough. **P5 and P6 confirmed.**
+
+**The bug that nearly buried it.** All 284 of those trajectories were silently discarded by my
+own masker. Qwen3's template merges consecutive tool messages into a single user turn, so
+rendering after each response is not append-only, the prefix check fails, and `build_example`
+returns `None`. It could only ever bite on multi-call turns, which no previous corpus contained —
+so the mixed arm would have trained on *zero* parallel examples while reporting a full 1,000, and
+the tidy conclusion would have been "adding parallel data does not help, so the damage is
+broad." Nothing downstream would have shown it: the loss curve is unremarkable and the arm simply
+fails to learn the one thing it exists to learn. It was caught by counting how many multi-call
+trajectories survived `build_example` before spending any GPU time, and is now pinned by
+`test_a_turn_calling_two_tools_at_once_survives_masking`.
+
+**It was not free.** The repair bought AST accuracy by moving the model along the same act/abstain
+axis as §3.6, and the trade is visible in the decomposition:
+
+| | should NOT call | should call |
+|---|---|---|
+| Base | 0.801 | 0.625 |
+| + SFT | **0.903** | **0.375** |
+| SFT mixed | 0.642 | **0.812** |
+
+SFT was the most abstemious checkpoint in the project; the mix turns it into one of the most
+eager, best-in-class at calling when calling is right (0.812) and materially worse than base at
+staying silent (0.642 against 0.801). That is unsurprising in hindsight and was *not* predicted:
+every Hermes trajectory calls a function, so a corpus half made of them teaches "call something".
+It also means the arm cannot be read as strictly better — it is better where the old one was
+catastrophic and worse where the old one was strong.
+
+Multi-turn stayed poor (0.025 against base's 0.080) and in-domain `pass^1` moved only 0.035 →
+0.055, both consistent with **P7**: the mix does nothing about the actual in-domain failure, which
+is asking a user simulator that does not exist.
+
+**What this does and does not license.** It licenses a specific claim — narrow SFT data removed a
+capability, and restoring the demonstrations restored the capability. It does not show the mix
+makes a better agent: the RL-prior question is untouched, because SFT's value was never as a
+policy (+0.301 as an initialisation, §3.1) and testing that needs a GRPO run from `sft_mixed`
+which was not bought. The honest summary is that the diagnosis in §3.6 was correct and
+actionable, and acting on it moved one failure mode into another rather than eliminating it.
+
 ---
 
 ## 4. Engineering findings

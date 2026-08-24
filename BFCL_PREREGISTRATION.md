@@ -140,6 +140,31 @@ reason than predicted.
 opposite of the prediction drawn from `refuse_invalid` collapsing to 0.00 in-domain. In-domain
 restraint behaviour did not transfer as an ordering between arms.
 
+## Follow-up outcome: P5–P7
+
+| prediction | verdict |
+|---|---|
+| **P5** `sft_mixed` materially above zero on parallel | **confirmed** — 0.000 → 0.705 / 0.590 |
+| **P6** pooled AST recovers well above 0.371 | **confirmed** — 0.728 |
+| **P7** in-domain `pass^1` stays in 0.03–0.15 | **confirmed** — 0.055 |
+
+`parallel` returns to 0.705 against base's 0.725, and pooled AST recovers 82% of what SFT
+destroyed, from changing nothing but which trajectories the model read. The narrow explanation in
+§3.6 — a missing demonstration rather than lost capacity — is correct.
+
+**One unpredicted cost, and it is not small.** The repair moved the model along the act/abstain
+axis: should-not-call falls 0.903 → 0.642 (base 0.801) while should-call rises 0.375 → 0.812. Every
+Hermes trajectory calls a function, so a corpus half made of them teaches eagerness. `sft_mixed`
+is therefore not strictly better than `sft` — better where the old arm was catastrophic, worse
+where it was strong. The confounder named in advance did not materialise: this is a
+redistribution along one axis, not uniform degradation from halving the APIGen data.
+
+**The near-miss worth recording.** All 284 multi-call trajectories were silently dropped by the
+masker, because Qwen3's template merges consecutive tool messages and breaks the incremental
+prefix check. The arm would have trained on zero parallel examples while reporting a full 1,000,
+and P5 would have been "refuted" by a bug rather than by evidence. Caught by counting survivors
+before spending GPU time; pinned by a test.
+
 **The failure mode named in advance nearly happened, for a different reason.** The pre-registered
 worry was all-zero multi-turn scores. Instead the first complete sweep returned four
 *statistically identical* arms — because a merge bug had overwritten every checkpoint with base

@@ -16,6 +16,7 @@ ARMS = [
     ("sft", "+ SFT"),
     ("grpo", "SFT+RL (30)"),
     ("rl_only_long", "RL only (200)"),
+    ("sft_mixed", "SFT mixed"),
 ]
 
 # Grouped the way the pre-registration reads them: syntax, restraint, and the multi-turn

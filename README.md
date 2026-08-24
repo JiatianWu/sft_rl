@@ -60,6 +60,21 @@ the base model had was trained out of it, and no in-domain metric could see it �
 the same single-call environment. The 0.797 is a real gain in the environment it was trained
 for, bought with general capability. [WRITEUP.md](WRITEUP.md) §3.6.
 
+### The diagnosis was actionable
+
+Mixing parallel-call data into SFT — 500 Hermes trajectories replacing 500 APIGen ones, total
+held at 1,000 — repairs it, which confirms the cause was a missing demonstration rather than
+lost capacity:
+
+| | Base | + SFT | **SFT mixed** |
+|---|---|---|---|
+| `parallel` | 0.725 | **0.000** | **0.705** |
+| **AST pooled** | 0.807 | 0.371 | **0.728** |
+
+82% of the damage recovered by changing nothing but which trajectories the model read. It is not
+free: the same change moves the model along the act/abstain axis, trading abstention (0.903 →
+0.642) for willingness to call (0.375 → 0.812). [WRITEUP.md](WRITEUP.md) §3.7.
+
 ## The loop
 
 | Stage | What it does | Entry point |

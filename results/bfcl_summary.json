@@ -135,6 +135,40 @@
         270,
         400
       ]
+    },
+    "sft_mixed": {
+      "irrelevance": [
+        166,
+        240
+      ],
+      "live_irrelevance": [
+        556,
+        884
+      ],
+      "live_relevance": [
+        13,
+        16
+      ],
+      "multi_turn_base": [
+        5,
+        200
+      ],
+      "multiple": [
+        152,
+        200
+      ],
+      "parallel": [
+        141,
+        200
+      ],
+      "parallel_multiple": [
+        118,
+        200
+      ],
+      "simple_python": [
+        317,
+        400
+      ]
     }
   },
   "bfcl_noise_floor": {
@@ -273,6 +307,7 @@
         346,
         400
       ]
-    }
+    },
+    "sft_mixed": {}
   }
 }
