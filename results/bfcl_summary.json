@@ -68,6 +68,40 @@
         400
       ]
     },
+    "grpo_mixed": {
+      "irrelevance": [
+        113,
+        240
+      ],
+      "live_irrelevance": [
+        397,
+        884
+      ],
+      "live_relevance": [
+        14,
+        16
+      ],
+      "multi_turn_base": [
+        8,
+        200
+      ],
+      "multiple": [
+        165,
+        200
+      ],
+      "parallel": [
+        141,
+        200
+      ],
+      "parallel_multiple": [
+        121,
+        200
+      ],
+      "simple_python": [
+        328,
+        400
+      ]
+    },
     "rl_only_long": {
       "irrelevance": [
         191,
@@ -240,6 +274,7 @@
         400
       ]
     },
+    "grpo_mixed": {},
     "rl_only_long": {
       "irrelevance": [
         202,

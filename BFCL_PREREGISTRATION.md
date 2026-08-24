@@ -204,6 +204,39 @@ prefix check. The arm would have trained on zero parallel examples while reporti
 and P5 would have been "refuted" by a bug rather than by evidence. Caught by counting survivors
 before spending GPU time; pinned by a test.
 
+## Follow-up 2 outcome: P8–P10
+
+| prediction | verdict |
+|---|---|
+| **P8** `grpo_mixed` beats RL-only's 0.496 | **refuted** — 0.475, the prior is worth nothing |
+| **P9** lookup compliance falls below `grpo`'s 1.00 | **refuted** — 0.998, anchoring fully intact |
+| **P10** `parallel` stays above 0.4 through RL | **confirmed** — 0.705, unchanged |
+
+Two of three wrong, and the misses are the informative part.
+
+**P8 — the mixed corpus is worthless as an RL prior.** 30 GRPO steps from `sft_mixed` reach 0.475,
+against 0.797 from `sft` and 0.496 from no prior at all. The +0.301 that was the entire case for
+running SFT did not survive halving the APIGen data: what remains is indistinguishable from
+starting cold, and if anything a shade below it. The per-family breakdown says where it went —
+`return_items` 0.16 against `grpo`'s 1.00 and RL-only's 0.91, `cancel_order` 0.23 against 0.66.
+The write-heavy families, the ones that need retail protocol rather than general tool syntax, are
+exactly what the removed 500 trajectories carried.
+
+**P9 — anchoring is not a side effect of timidity.** P9's reasoning was that §3.3's lookup
+compliance came from SFT's over-caution, so a corpus that made the model eager should let RL drift
+toward the shortcut. It did not: compliance is 0.998, statistically identical to `grpo`'s 1.000,
+in the *most* eager checkpoint in the project (should-not-call 0.454). Eagerness and
+procedure-following are independent axes. Whatever SFT installs that resists the §3.3 reward hack
+is carried by both corpora and is not the same thing as reluctance — better news than P9 being
+right, since it means the anchoring is robust to changing the data.
+
+**P10 — the repair survives RL.** `parallel` is 0.705 before and after, `parallel_multiple` goes
+0.590 → 0.605, pooled AST 0.728 → 0.755. Thirty steps of single-call RL do not erase parallel
+calling once the prior has it, so §3.7's fix belongs before RL and stays there. Restraint degrades
+further and by a lot, though: pooled 0.645 → 0.460, should-not-call 0.642 → 0.454, the worst of any
+checkpoint measured. Both stages push the same way on the act/abstain axis, and nothing in the
+pipeline pays for abstaining.
+
 **The failure mode named in advance nearly happened, for a different reason.** The pre-registered
 worry was all-zero multi-turn scores. Instead the first complete sweep returned four
 *statistically identical* arms — because a merge bug had overwritten every checkpoint with base

@@ -71,9 +71,29 @@ lost capacity:
 | `parallel` | 0.725 | **0.000** | **0.705** |
 | **AST pooled** | 0.807 | 0.371 | **0.728** |
 
-82% of the damage recovered by changing nothing but which trajectories the model read. It is not
-free: the same change moves the model along the act/abstain axis, trading abstention (0.903 →
-0.642) for willingness to call (0.375 → 0.812). [WRITEUP.md](WRITEUP.md) §3.7.
+82% of the damage recovered by changing nothing but which trajectories the model read, and it
+survives 30 steps of RL on top (`parallel` 0.705, AST pooled 0.755) — so the fix belongs before RL
+and stays there. [WRITEUP.md](WRITEUP.md) §3.7.
+
+### But it does not pay for itself
+
+Running GRPO from the mixed prior, matched step for step against the 0.797 arm, answers the
+question that actually mattered — whether SFT is still worth running:
+
+| in-domain pass^1 | RL only (30) | SFT + RL (30) | **SFT mixed + RL (30)** |
+|---|---|---|---|
+| | 0.496 | **0.797** | **0.475** |
+
+**The +0.301 is gone entirely** — no better than starting cold. `return_items` falls to 0.16 from
+1.00, and the write-heavy families are exactly what the 500 removed APIGen trajectories carried.
+SFT's value as an initialisation was never "SFT"; it was *domain-matched* trajectories, and holding
+the corpus at 1,000 made the two goals trade directly against each other. Next run: 1,000 APIGen
+plus 500 Hermes, twenty more minutes of GPU.
+
+One dial explains most of the project. Order the six arms by how well they abstain and the
+willingness-to-call column comes back in near-perfect reverse; every intervention moved it, none on
+purpose, and `sft_mixed + RL` ends up best-in-class at calling (0.875) and worst at staying silent
+(0.454). Nothing in either stage ever pays for silence. [WRITEUP.md](WRITEUP.md) §3.8.
 
 ## The loop
 

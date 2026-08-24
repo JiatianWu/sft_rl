@@ -19,6 +19,11 @@ TAGS = [
     ("grpo", "+ SFT + GRPO"),
     ("rl_only_long", "GRPO only (long)"),
     ("grpo_long", "+ SFT + GRPO (long)"),
+    # The mixed arms replace 500 of SFT's 1,000 APIGen trajectories with Hermes ones to restore
+    # parallel calling (§3.7). `grpo_mixed` trains 30 GRPO steps from `sft_mixed`, matching `grpo`
+    # step for step, so the two RL columns differ only in which prior they started from.
+    ("sft_mixed", "+ SFT mixed"),
+    ("grpo_mixed", "+ SFT mixed + GRPO"),
 ]
 
 HEADLINE = [

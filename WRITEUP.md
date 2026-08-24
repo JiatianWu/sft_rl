@@ -567,10 +567,76 @@ is asking a user simulator that does not exist.
 
 **What this does and does not license.** It licenses a specific claim — narrow SFT data removed a
 capability, and restoring the demonstrations restored the capability. It does not show the mix
-makes a better agent: the RL-prior question is untouched, because SFT's value was never as a
-policy (+0.301 as an initialisation, §3.1) and testing that needs a GRPO run from `sft_mixed`
-which was not bought. The honest summary is that the diagnosis in §3.6 was correct and
-actionable, and acting on it moved one failure mode into another rather than eliminating it.
+makes a better agent, because SFT's value here was never as a policy but as an initialisation
+(+0.301, §3.1), and the mix changes the corpus that produced it. §3.8 tests that directly.
+
+### 3.8 The repair does not pay for itself
+
+The only reason to run SFT in this pipeline was §3.1: as a policy it is worse than base (0.035
+against 0.132), but as an RL initialisation it is worth +0.301 at matched compute. §3.7 replaced
+half the corpus that produced that number, so it has to be re-measured rather than assumed.
+`grpo_mixed` runs 30 GRPO steps from `sft_mixed`, matching the `grpo` arm step for step, so the
+prior is the only variable. Predictions were committed first (P8–P10).
+
+| in-domain, 2,400 episodes | RL only (30) | SFT + RL (30) | **SFT mixed + RL (30)** |
+|---|---|---|---|
+| **pass^1** | 0.496 | **0.797** | **0.475** |
+| `return_items` | 0.91 | 1.00 | **0.16** |
+| `cancel_order` | 0.54 | 0.66 | **0.23** |
+| `modify_address` | 0.84 | 1.00 | 0.86 |
+| `refuse_invalid` | 0.00 | 0.87 | 0.77 |
+| looked up before writing | 0.94 | 1.00 | **1.00** |
+
+**The prior is worth nothing.** 0.475 against 0.496 from no prior at all: the entire +0.301
+evaporated. **P8 refuted.** The damage is concentrated in the write-heavy families —
+`return_items` collapses from 1.00 to 0.16, below even the arm that never saw SFT — which is
+where retail protocol matters rather than general tool syntax, and precisely what the 500 removed
+APIGen trajectories carried. So SFT's value as an initialisation was never "SFT" in the abstract;
+it was *domain-matched* trajectories, and half of them is not half as good.
+
+That reframes §3.7. Restoring parallel calling and preserving the RL prior are not independent
+knobs to be set separately — under a fixed corpus size they trade against each other directly, and
+this experiment bought 0.357 of pooled AST for 0.322 of in-domain `pass^1`. The obvious response
+is to stop holding the total at 1,000, which was a control for this comparison and not a budget
+constraint; 1,000 APIGen plus 500 Hermes costs another twenty minutes of GPU and is the run I
+would do next.
+
+**Anchoring survived, which was not expected.** P9 predicted lookup compliance would fall, on the
+theory that §3.3's perfect compliance was a side effect of SFT's timidity — and `sft_mixed` traded
+away exactly that timidity. Compliance is 0.998. **P9 refuted**, in the useful direction: the
+checkpoint that follows the lookup-then-write procedure essentially always is simultaneously the
+most eager one in the project (should-not-call 0.454). Procedure-following and eagerness are
+independent axes, so whatever SFT installs that resists the §3.3 reward hack is not reluctance,
+and it is robust to changing half the data.
+
+**On BFCL the repair holds, and restraint keeps sliding.**
+
+| | Base | + SFT | SFT+RL (30) | SFT mixed | **SFT mixed + RL (30)** |
+|---|---|---|---|---|---|
+| `parallel` | 0.725 | 0.000 | 0.000 | 0.705 | **0.705** |
+| `parallel_multiple` | 0.750 | 0.000 | 0.000 | 0.590 | 0.605 |
+| **AST pooled** | 0.807 | 0.371 | 0.493 | 0.728 | **0.755** |
+| **Restraint pooled** | 0.798 | **0.896** | 0.636 | 0.645 | **0.460** |
+| should NOT call | 0.801 | 0.903 | 0.634 | 0.642 | **0.454** |
+| should call | 0.625 | 0.375 | 0.750 | 0.812 | **0.875** |
+
+**P10 confirmed**: thirty steps of single-call RL do not erase parallel calling once the prior has
+it. The §3.7 fix belongs before RL and stays put, which is what makes it worth having at all — a
+repair the second stage undid would be useless here.
+
+The restraint column is the finding I did not predict at any point. `sft_mixed + RL` is the most
+capable arm at *calling* (should-call 0.875, best measured, above base's 0.625) and the worst at
+*not* calling (0.454 against base's 0.801). Both stages push the same direction: Hermes teaches
+"call something" because every one of its trajectories does, and the GRPO reward pays only for
+completed tasks, so neither stage ever pays for silence.
+
+Ordering the six arms by should-not-call recovers the should-call column almost exactly in reverse
+— 0.375, 0.625, 0.812, 0.812, 0.750, 0.875, one inversion, and that between two arms 0.008 apart on
+the sort key. **This pipeline has one act/abstain dial, and every intervention turns it, none of
+them deliberately.** The caveat is that `should call` is BFCL's `live_relevance`, only 16 cases, so
+each step is one or two examples and it cannot carry the claim alone; the abstention column
+(n=1,124) is what makes the pattern solid. The fix is a reward term for correct abstention plus
+irrelevance episodes in the environment, neither of which exists today.
 
 ---
 
@@ -620,6 +686,15 @@ changed the design:
   external category, and the SFT arms lose 0.436 AST accuracy — including parallel calling
   falling to exactly zero. The in-domain result stands as a measurement of the environment it
   was trained for and nothing wider.
+- **The one experiment that repaired transfer cost the whole reason for running SFT** (§3.8).
+  Mixing in parallel-call data recovers 82% of the AST damage and survives RL, but GRPO from the
+  mixed prior reaches 0.475 against 0.797 from the original — no better than no prior at all.
+  Holding the corpus at 1,000 trajectories was a control, and it forced the two goals to trade;
+  whether they still trade at 1,500 is untested and is the first thing I would run.
+- **Nothing in either stage pays for abstention** (§3.8). Ordering the arms by should-not-call
+  recovers should-call in near-reverse, and the final arm is the worst abstainer measured (0.454
+  against base's 0.801). This was never a design decision — it is a gap in the reward, which has
+  no term for correct refusal, and in the environment, which has no irrelevance episodes.
 - **BFCL multi-turn was underpowered for the question it was run to answer.** One category,
   200 cases, ~6% accuracy: the 95% interval is roughly ±3.3 points, so P1 needed a gap of five
   points to register and got one test case. The four-category multi-turn suite (800 cases) was

@@ -1,0 +1,33 @@
+{
+  "pass^1": 0.475,
+  "pass^2": 0.4666666666666667,
+  "pass^3": 0.46125,
+  "pass^4": 0.45666666666666667,
+  "r_action": 0.58125,
+  "r_output": 0.69625,
+  "r_outcome": 0.475,
+  "r_progress": 0.59375,
+  "n_calls": 3.234583333333333,
+  "n_redundant": 0.10416666666666667,
+  "n_failed": 0.18125,
+  "n_illegal_writes": 0.16208333333333333,
+  "n_malformed": 0.014166666666666666,
+  "n_unknown_tool": 0.0,
+  "called_any_tool": 1.0,
+  "reward": 0.5833541666666666,
+  "per_family_success": {
+    "cancel_order": 0.225,
+    "modify_address": 0.865,
+    "return_items": 0.1625,
+    "exchange_items": 0.225,
+    "lookup_and_report": 0.6025,
+    "refuse_invalid": 0.77
+  },
+  "n_episodes": 2400,
+  "n_tasks": 600,
+  "tag": "grpo_mixed",
+  "adapter": "/work/checkpoints/grpo_mixed",
+  "trials": 4,
+  "temperature": 0.7,
+  "elapsed_s": 349.3
+}
