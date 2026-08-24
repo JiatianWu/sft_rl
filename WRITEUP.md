@@ -632,10 +632,11 @@ and I got it wrong at first.
 
 Ordering the six arms by should-not-call recovers the should-call column almost exactly in reverse
 — 0.375, 0.625, 0.812, 0.812, 0.750, 0.875, one inversion, and that between two arms 0.008 apart on
-the sort key. **This pipeline has one act/abstain dial, and every intervention turns it, none of
-them deliberately.** The caveat is that `should call` is BFCL's `live_relevance`, only 16 cases, so
-each step is one or two examples and it cannot carry the claim alone; the abstention column
-(n=1,124) is what makes the pattern solid.
+the sort key. Every intervention up to this point turned that dial, and none of them deliberately.
+The caveat is that `should call` is BFCL's `live_relevance`, only 16 cases, so each step is one or
+two examples and it cannot carry the claim alone; the abstention column (n=1,124) is what makes the
+pattern solid. §3.10 then shows the two are separable after all — the ordering described six arms
+that happened to vary one thing, rather than a constraint.
 
 ### 3.9 The RL environment trains against abstention, and a bug fix is why
 
@@ -696,6 +697,61 @@ answer genuinely is no call at all, scored by the output check rather than the s
 machinery for which already exists, since `lookup_and_report` is scored with an empty oracle and
 `r_progress` defined as having refrained from writing. It needs one extension: for such a family,
 refraining must mean *no calls*, not merely no writes.
+
+### 3.10 Training restraint back: it works, and it barely transfers
+
+`grpo_abstain` adds one family, `irrelevant_request`, in which the user asks something no tool here
+can serve and the correct episode makes no call at all. Two design points earn their keep. Restraint
+gates the **state** term rather than progress, because reads leave the database untouched and the
+hash check alone cannot tell a refusal from four wasted lookups followed by one — as progress-only
+scoring, "read four times then decline politely" would have scored a perfect 1.0 on the family built
+to teach restraint. And topics are **held out** between train and test the way databases already
+are, so the in-domain number cannot be earned by memorising 24 strings. GRPO then runs 30 steps from
+`sft_mixed`, matching `grpo_mixed` exactly; the system prompt is untouched and the headline 600-task
+split fingerprints identically, so every earlier number stays comparable. P11–P14 were committed
+first.
+
+| | SFT mixed + RL (30) | **+ abstention family** | Base |
+|---|---|---|---|
+| in-domain `pass^1` (6 families) | 0.475 | 0.436 | 0.132 |
+| in-domain abstention, held-out topics | *(not expressible)* | **0.820** | — |
+| ...of which made zero calls | — | **400/400** | — |
+| BFCL restraint pooled | 0.460 | **0.545** | 0.798 |
+| BFCL should NOT call | 0.454 | **0.541** | 0.801 |
+| BFCL should call | 0.875 | 0.812 | 0.625 |
+| BFCL AST pooled | 0.755 | 0.747 | 0.807 |
+| `refuse_invalid` | 0.770 | 0.723 | 0.000 |
+
+**All four predictions confirmed, and the headline is that it works.** BFCL restraint goes 0.460 →
+0.545 (z = 4.06), against a measured noise floor of 0.012–0.017, while AST holds at 0.747 against
+0.755 — a difference smaller than the floor. **P11 and P12 confirmed.** In-domain `pass^1` costs
+0.039 and `refuse_invalid` 0.047, both inside the predicted bands (**P13, P14**). The model did not
+simply go quiet either: it still calls a tool in 100% of episodes on the six normal families.
+
+**So the act/abstain axis is not one dial after all.** §3.8 read the near-perfect reverse ordering
+of the two columns as a single parameter every intervention happened to turn. This arm moves
+abstention by +0.087 while leaving syntax alone and giving back one test case of sixteen on
+should-call, which is the one result in the project that separates them. The reverse ordering was
+real but it was a description of six arms that all happened to vary one thing, not a constraint.
+Restraint is separately addressable, and the earlier framing was too fatalistic.
+
+**The finding that matters more is the size of the transfer gap.** In-domain the intervention is
+not merely successful, it is *saturated*: **400 of 400** held-out-topic episodes make zero tool
+calls, perfect restraint on topics never trained on. The same checkpoint recovers **25%** of the
+distance to base on BFCL's should-not-call (0.454 → 0.541 against 0.801). Perfect in-domain
+generalisation across topics buys a quarter of the external gap. Whatever `irrelevant_request`
+teaches — "requests with no email and no order id get no tool call" — is narrower than "decide
+whether the tools you were handed can serve this request", which is what BFCL grades. The residual
+0.180 in-domain is entirely the text check (`r_action` is 1.000, `r_output` 0.820): the model
+abstains and sometimes forgets to say why.
+
+That is the same lesson as §3.6 arriving from the opposite direction. There, an in-domain metric
+could not see a capability being destroyed; here, an in-domain metric is saturated by an
+intervention that moves the external one a quarter as far. **Both times the environment was too
+narrow to measure what I wanted to claim, and both times only the external benchmark showed it.**
+The fix is not a better reward term but a wider distribution of irrelevance — varied tool
+inventories, requests that are plausible-but-unserveable rather than obviously off-topic — which is
+a data problem, not a scoring one.
 
 ---
 
@@ -758,6 +814,11 @@ changed the design:
   RL training therefore teaches that out-of-policy requests warrant four to five calls, which is
   the opposite of what BFCL irrelevance scores. Worse, that requirement exists because it patched
   an earlier hack in which passivity scored a perfect 1.0.
+- **The fix for that is saturated in-domain and only a quarter effective externally** (§3.10).
+  400/400 held-out-topic episodes abstain correctly, yet BFCL should-not-call recovers 25% of the
+  distance to base. The in-domain family teaches a narrower rule than the benchmark grades, and no
+  amount of in-domain measurement would have revealed the difference — the same blind spot as §3.6,
+  approached from the opposite direction.
 - **BFCL multi-turn was underpowered for the question it was run to answer.** One category,
   200 cases, ~6% accuracy: the 95% interval is roughly ±3.3 points, so P1 needed a gap of five
   points to register and got one test case. The four-category multi-turn suite (800 cases) was

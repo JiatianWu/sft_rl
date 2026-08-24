@@ -18,6 +18,7 @@ ARMS = [
     ("rl_only_long", "RL only (200)"),
     ("sft_mixed", "SFT mixed"),
     ("grpo_mixed", "SFT mixed + RL (30)"),
+    ("grpo_abstain", "+ abstention family"),
 ]
 
 # Grouped the way the pre-registration reads them: syntax, restraint, and the multi-turn

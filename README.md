@@ -103,6 +103,27 @@ That requirement exists because it patched an earlier hack where doing nothing s
 1.0 — **a reward-hack fix installed the bias an external benchmark found later**, and nothing
 in-domain could see it. [WRITEUP.md](WRITEUP.md) §3.9.
 
+### Acting on that diagnosis works, and mostly does not transfer
+
+Adding one family whose correct episode makes *no tool call at all*, with topics held out between
+train and test, then running the same 30 GRPO steps:
+
+| | SFT mixed + RL | **+ abstention family** | Base |
+|---|---|---|---|
+| BFCL restraint | 0.460 | **0.545** | 0.798 |
+| BFCL AST | 0.755 | 0.747 | 0.807 |
+| in-domain `pass^1` | 0.475 | 0.436 | 0.132 |
+
+Restraint recovers with z=4.06 while syntax stays inside the noise floor, so **the act/abstain axis
+is separable after all** — the near-perfect reverse ordering of the two columns across six arms
+described those six arms, not a constraint. Cost is 0.039 of in-domain `pass^1`.
+
+The gap is the real result. In-domain the fix is *saturated* — **400 of 400** held-out-topic
+episodes make zero calls — yet it recovers only **25%** of the external gap to base. What the family
+teaches ("no email, no order id, no call") is narrower than what BFCL grades. Same lesson as §3.6
+from the other side: the environment keeps being too narrow to support the claim, and only the
+external benchmark shows it. [WRITEUP.md](WRITEUP.md) §3.10.
+
 ## The loop
 
 | Stage | What it does | Entry point |

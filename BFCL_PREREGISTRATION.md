@@ -294,6 +294,37 @@ calls. A fifth of RL training therefore teaches that out-of-policy requests warr
 calls — the opposite of what BFCL irrelevance scores. And that requirement is itself a patch for an
 earlier hack in which doing nothing scored a perfect 1.0.
 
+## Follow-up 3 outcome: P11–P14
+
+| prediction | verdict |
+|---|---|
+| **P11** BFCL restraint recovers above 0.460 | **confirmed** — 0.545, z=4.06 |
+| **P12** AST holds within noise of 0.755 | **confirmed** — 0.747, below the floor |
+| **P13** in-domain `pass^1` within ±0.05 of 0.475 | **confirmed** — 0.436 |
+| **P14** `refuse_invalid` drops | **confirmed** — 0.770 → 0.723 |
+
+Four for four, which is less interesting than the two things that were not predicted.
+
+**The act/abstain axis is separable, so §3.8's "one dial" was too fatalistic.** Restraint moves
++0.087 while AST stays inside the noise floor and should-call gives back a single test case of
+sixteen. Ordering six arms by abstention had recovered the calling column in near-reverse, but that
+described six arms that all varied one thing; it was not a constraint. This is the first arm to move
+one column without paying in the other.
+
+**In-domain the intervention is saturated; externally it buys a quarter of the gap.** 400 of 400
+held-out-topic episodes make zero tool calls — perfect restraint on topics never trained on — while
+BFCL should-not-call recovers 25% of the distance to base (0.454 → 0.541 against 0.801). Perfect
+in-domain generalisation across topics is worth a quarter of the external gap, because
+`irrelevant_request` teaches something narrower than what BFCL grades: "no email and no order id
+means no call" rather than "decide whether these tools can serve this request". The residual 0.180
+in-domain is purely the text check — `r_action` is 1.000 and `r_output` 0.820, so it abstains and
+sometimes forgets to say why.
+
+Same lesson as §3.6 from the opposite side. There an in-domain metric could not see a capability
+being destroyed; here an in-domain metric saturates on an intervention that moves the external one a
+quarter as far. Both times the environment was too narrow to support the claim I wanted to make, and
+both times only the external benchmark showed it.
+
 **The failure mode named in advance nearly happened, for a different reason.** The pre-registered
 worry was all-zero multi-turn scores. Instead the first complete sweep returned four
 *statistically identical* arms — because a merge bug had overwritten every checkpoint with base

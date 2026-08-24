@@ -24,6 +24,10 @@ TAGS = [
     # step for step, so the two RL columns differ only in which prior they started from.
     ("sft_mixed", "+ SFT mixed"),
     ("grpo_mixed", "+ SFT mixed + GRPO"),
+    # Same prior and step count as `grpo_mixed`, differing only in that RL also sampled
+    # `irrelevant_request`. Reported on the unchanged six-family split, so the comparison is like
+    # for like; the abstention family itself is scored separately under `grpo_abstain_abstain`.
+    ("grpo_abstain", "+ abstention family"),
 ]
 
 HEADLINE = [

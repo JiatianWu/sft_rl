@@ -1,0 +1,28 @@
+{
+  "pass^1": 0.82,
+  "pass^2": 0.82,
+  "pass^3": 0.82,
+  "pass^4": 0.82,
+  "r_action": 1.0,
+  "r_output": 0.82,
+  "r_outcome": 0.82,
+  "r_progress": 1.0,
+  "n_calls": 0.0,
+  "n_redundant": 0.0,
+  "n_failed": 0.0,
+  "n_illegal_writes": 0.0,
+  "n_malformed": 0.0,
+  "n_unknown_tool": 0.0,
+  "called_any_tool": 0.0,
+  "reward": 1.12,
+  "per_family_success": {
+    "irrelevant_request": 0.82
+  },
+  "n_episodes": 400,
+  "n_tasks": 100,
+  "tag": "grpo_abstain_abstain",
+  "adapter": "/work/checkpoints/grpo_abstain",
+  "trials": 4,
+  "temperature": 0.7,
+  "elapsed_s": 69.9
+}
