@@ -101,6 +101,31 @@ just an aggregate.
 *Refuted if* its failures are spread evenly across task types, which would mean the abstention
 deficit measured by BFCL is a format artifact rather than a behavioural one.
 
+## Observed during the zero-cost plumbing run, before any measurement
+
+The chain was validated by pointing the *user simulator* at the same local vLLM server as the
+agent, which costs nothing and exercises the real `user_simulator` code path. It is not a
+measurement: a 0.6B customer answers "I'm here to assist you with your request", playing agent
+rather than customer, so no conversation converges. Three things came out of it that matter here.
+
+**Two harness bugs, found before they could cost anything.** Conversations overflowed a 16k context
+window, which τ-bench records as an infra error and drops from the denominator. And more seriously,
+τ-bench leaves `reward_basis`, `db_check` and `communicate_checks` **null** when a run ends on
+`max_steps` or an error, while `reward` still defaults to `0.0` — so averaging naively over all
+simulations manufactures a clean `pass^1 = 0.000` out of runs that were never scored at all. The
+summary now separates scored from unscored and reports `null` rather than a fake zero.
+
+**Agent-side plumbing is confirmed healthy.** Correct tool names, well-formed arguments, correct
+schema, parsed cleanly — the failures are entirely downstream of having no real interlocutor.
+
+**A hypothesis for P20/P21, logged now so it is not retrofitted later.** Given no usable
+information, `grpo_1500` invented plausible placeholders (`find_user_id_by_email` called with a
+*user_id*, then a fabricated name and zip) and then **repeated the same two failing calls ten times
+until the error limit fired, rather than asking the user for the missing detail**. If that survives
+contact with a competent user simulator, it is §3.9's finding showing up externally: an environment
+that rewards acting and punishes deferring produces an agent that retries instead of asking. Stated
+as a hypothesis, from one conversation with a broken counterpart — not as a result.
+
 ## What would make this uninformative
 
 **All arms scoring 0/114.** P19 already predicts very low scores, and there is a real chance they

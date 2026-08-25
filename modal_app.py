@@ -806,7 +806,10 @@ def _serve_vllm(tag: str, port: int = 8000):
             "--tool-call-parser", "hermes",
             "--port", str(port),
             "--gpu-memory-utilization", "0.85",
-            "--max-model-len", "16384",
+            # 16384 was not enough: retail conversations grow past it and litellm raises
+            # ContextWindowExceeded, which τ-bench records as an infra error and drops from the
+            # denominator. Qwen3 handles 32768 natively.
+            "--max-model-len", "32768",
         ]
     )
     for _ in range(180):
@@ -899,6 +902,7 @@ def tau2(
     num_trials: int = 1,
     user_llm: str = "openai/gpt-4.1-mini",
     concurrency: int = 4,
+    max_steps: int = 100,
 ) -> dict:
     """Run τ-bench retail against one merged checkpoint.
 
@@ -914,6 +918,12 @@ def tau2(
     `num_tasks` defaults to a pilot-sized 10. The full retail split is 114 tasks and a 0.6B model
     may well score zero on all of them, which would be the BFCL multi-turn power problem again but
     with a metered API attached, so the pilot decides whether the full run is worth buying.
+
+    Passing `user_llm="hosted_vllm/<tag>"` points the customer at the same local server as the
+    agent, which exercises the real `user_simulator` path for free. Useful as a plumbing check;
+    useless as a measurement, since a 0.6B customer cannot hold up its half of the conversation.
+    (`--user dummy_user` cannot serve this purpose: it exists only for solo mode, which asserts on
+    tasks carrying a `ticket` field, and no retail task has one.)
     """
     import json
     import shutil
@@ -930,6 +940,7 @@ def tau2(
             "--user-llm", user_llm,
             "--num-trials", str(num_trials),
             "--max-concurrency", str(concurrency),
+            "--max-steps", str(max_steps),
             "--save-to", run_name,
         ]
         if num_tasks:
@@ -952,21 +963,42 @@ def tau2(
     try:
         results = json.loads((destination / "results.json").read_text())
         simulations = results.get("simulations", [])
-        rewards = [(s.get("reward_info") or {}).get("reward", 0.0) for s in simulations]
-        # TAU2_PREREGISTRATION.md commits to reporting these two apart: `sft` could gain on
+
+        # A `reward` of 0.0 has two entirely different meanings here, and conflating them would
+        # manufacture a clean "pass^1 = 0.000" that reads as a capability verdict but is really a
+        # harness artifact. When a run ends on `max_steps` or an infra error, τ-bench never
+        # evaluates it: `db_check`, `communicate_checks` and `reward_basis` all come back null and
+        # `reward` defaults to zero. Only simulations that actually reached an evaluator are scored
+        # below; the rest are counted and reported separately.
+        terminations: dict[str, int] = {}
+        scored, rewards = [], []
+        for simulation in simulations:
+            reason = simulation.get("termination_reason") or "unknown"
+            terminations[reason] = terminations.get(reason, 0) + 1
+            info = simulation.get("reward_info") or {}
+            if info.get("reward_basis") is None:
+                continue
+            scored.append(simulation)
+            rewards.append(info.get("reward", 0.0))
+
+        # TAU2_PREREGISTRATION.md commits to reporting these apart: `sft` could gain on
         # COMMUNICATE alone by being chattier, which is not the §3.1 reversal it would resemble.
         breakdown: dict[str, list[float]] = {}
-        for simulation in simulations:
+        for simulation in scored:
             for key, value in ((simulation.get("reward_info") or {}).get("reward_breakdown") or {}).items():
                 if isinstance(value, (int, float)):
-                    breakdown.setdefault(key, []).append(float(value))
+                    breakdown.setdefault(str(key), []).append(float(value))
+
         summary = {
             "tag": tag,
             "user_llm": user_llm,
-            "n": len(rewards),
-            "pass^1": sum(rewards) / len(rewards) if rewards else 0.0,
+            "n_simulations": len(simulations),
+            "n_scored": len(rewards),
+            "pass^1": sum(rewards) / len(rewards) if rewards else None,
             "solved": sum(1 for r in rewards if r >= 1.0),
             "components": {k: sum(v) / len(v) for k, v in breakdown.items() if v},
+            "terminations": terminations,
+            "user_cost": sum(s.get("user_cost") or 0.0 for s in simulations),
         }
     except Exception as error:  # noqa: BLE001 - never lose a paid run to a parse error
         summary = {"tag": tag, "error": repr(error), "raw": str(destination)}
