@@ -83,6 +83,36 @@ bfcl_image = (
     )
 )
 
+# τ-bench needs a third image, and for once the isolation is free rather than forced: tau2-bench
+# installs into its own uv-managed venv under /opt/tau2, so its dependency set and vLLM's never
+# meet. vLLM here matches `bfcl_image` because that combination is known to serve Qwen3.
+tau2_image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .apt_install("git", "curl")
+    .pip_install("vllm==0.8.5", "transformers==4.51.3", "soundfile")
+    .run_commands(
+        "curl -LsSf https://astral.sh/uv/install.sh | sh",
+        "git clone --depth 1 https://github.com/sierra-research/tau2-bench /opt/tau2",
+        # Core only. The voice extra pulls ElevenLabs/Deepgram and needs API keys we do not have,
+        # and `retail` is a text domain.
+        "cd /opt/tau2 && /root/.local/bin/uv sync",
+    )
+    .env(
+        {
+            "HF_HOME": "/cache/hf",
+            "TOKENIZERS_PARALLELISM": "false",
+            "VLLM_USE_FLASHINFER_SAMPLER": "0",
+            "TAU2_DATA_DIR": "/opt/tau2/data",
+            # LiteLLM reaches the local vLLM server through the `hosted_vllm/` prefix, which reads
+            # this variable. Using `openai/` instead would work for the agent and then silently
+            # redirect the *user simulator* to the same local 0.6B model, quietly replacing the
+            # benchmark's user with our own checkpoint.
+            "HOSTED_VLLM_API_BASE": "http://localhost:8000/v1",
+            "HOSTED_VLLM_API_KEY": "dummy",
+        }
+    )
+)
+
 app = modal.App(APP_NAME, image=image)
 
 cache = modal.Volume.from_name("tooluse-cache", create_if_missing=True)
@@ -736,6 +766,212 @@ def bfcl_sweep(jobs: str = "", threads: int = 64) -> None:
     print(f"[sweep] {len(specs)} containers in parallel", flush=True)
     for result in bfcl.starmap([(tag, categories, threads) for tag, categories in specs]):
         print(f"[sweep] {result['tag']}: {json.dumps(result['scores'])}", flush=True)
+
+
+def _optional_secret(name: str) -> list:
+    """Attach a secret only when it exists.
+
+    Modal resolves every secret the app references when the app *starts*, not when the function
+    using it is called, so an absent `openai-key` blocks `tau2_probe` — which deliberately needs no
+    credentials. That would defeat the entire point of having a free pre-flight check for the one
+    failure mode that silently produces a full sweep of zeros.
+    """
+    try:
+        secret = modal.Secret.from_name(name)
+        secret.hydrate()
+        return [secret]
+    except Exception:
+        return []
+
+
+def _serve_vllm(tag: str, port: int = 8000):
+    """Start vLLM's OpenAI server on a merged checkpoint and wait until it answers.
+
+    `--tool-call-parser hermes` is the load-bearing flag. Qwen3 emits tool calls as
+    `<tool_call>{...}</tool_call>` inside the message body; without a parser vLLM returns that
+    verbatim as `content` and `tool_calls` stays empty. τ-bench would then record an agent that
+    never called a tool, score 0 on all 114 retail tasks, and look exactly like "0.6B is too small
+    for this benchmark" — a conclusion that is cheap to reach, expensive to unwind, and wrong.
+    `tau2_probe` exists to fail on this before any paid API call is made.
+    """
+    import subprocess
+    import time
+    import urllib.request
+
+    server = subprocess.Popen(
+        [
+            "vllm", "serve", f"/work/merged/{tag}",
+            "--served-model-name", tag,
+            "--enable-auto-tool-choice",
+            "--tool-call-parser", "hermes",
+            "--port", str(port),
+            "--gpu-memory-utilization", "0.85",
+            "--max-model-len", "16384",
+        ]
+    )
+    for _ in range(180):
+        if server.poll() is not None:
+            raise RuntimeError(f"vllm exited with {server.returncode} before becoming ready")
+        try:
+            urllib.request.urlopen(f"http://localhost:{port}/health", timeout=2)
+            print(f"[tau2] vllm serving {tag}", flush=True)
+            return server
+        except Exception:
+            time.sleep(5)
+    server.terminate()
+    raise RuntimeError("vllm did not become ready within 15 minutes")
+
+
+@app.function(gpu=GPU, image=tau2_image, volumes=VOLUMES, timeout=1 * HOURS)
+def tau2_probe(tag: str = "grpo_1500") -> None:
+    """Assert the served checkpoint actually emits parsed tool calls. No API key needed.
+
+    This is the one trap from the BFCL run that would repeat verbatim here, so it gets checked
+    on its own, for free, before the benchmark is allowed to cost anything.
+    """
+    import json
+    import urllib.request
+
+    server = _serve_vllm(tag)
+    try:
+        payload = {
+            "model": tag,
+            "messages": [
+                {"role": "system", "content": "You are a retail agent. Use the tools provided."},
+                {"role": "user", "content": "Cancel my order #W123. My email is amy@example.com."},
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "find_user_id_by_email",
+                        "description": "Find a user id from their email address.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"email": {"type": "string"}},
+                            "required": ["email"],
+                        },
+                    },
+                }
+            ],
+            "temperature": 0.0,
+            "max_tokens": 256,
+        }
+        request = urllib.request.Request(
+            "http://localhost:8000/v1/chat/completions",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        message = json.loads(urllib.request.urlopen(request, timeout=120).read())["choices"][0]["message"]
+        print(f"[probe] content: {message.get('content')!r}", flush=True)
+        print(f"[probe] tool_calls: {json.dumps(message.get('tool_calls'))}", flush=True)
+
+        calls = message.get("tool_calls") or []
+        if not calls:
+            raise RuntimeError(
+                "no parsed tool_calls — τ-bench would score every task 0 and it would look like "
+                "the model is simply too small. Check --tool-call-parser."
+            )
+        print(f"[probe] OK — {calls[0]['function']['name']} parsed as a tool call", flush=True)
+    finally:
+        server.terminate()
+
+
+@app.function(image=tau2_image, timeout=1 * HOURS)
+def tau2_check() -> None:
+    """Verify the τ-bench data set and CLI surface without starting a GPU."""
+    import subprocess
+
+    for command in (["tau2", "check-data"], ["tau2", "run", "--help"]):
+        subprocess.run(["/root/.local/bin/uv", "run", *command], cwd="/opt/tau2", check=False)
+
+
+@app.function(
+    gpu=GPU,
+    image=tau2_image,
+    volumes=VOLUMES,
+    timeout=4 * HOURS,
+    secrets=_optional_secret("openai-key"),
+)
+def tau2(
+    tag: str = "grpo_1500",
+    num_tasks: int = 10,
+    num_trials: int = 1,
+    user_llm: str = "openai/gpt-4.1-mini",
+    concurrency: int = 4,
+) -> dict:
+    """Run τ-bench retail against one merged checkpoint.
+
+    Why this benchmark, given BFCL already said the gains do not transfer: τ-bench retail is the
+    thing `tau-retail-lite` is a simplification *of*, so it is not an independent capability check
+    the way BFCL was — it tests whether the simplification was faithful. Two things make that worth
+    paying for. It has a user simulator, whose absence is the stated cause of §3.1's headline result
+    (SFT scoring 0.035 because APIGen-MT teaches the model to interrogate a user that this
+    environment does not have), so it can reverse that finding. And its reward is
+    `DB x COMMUNICATE` — a state check times an output check — which is structurally the same
+    product `compute_reward` uses, arrived at independently.
+
+    `num_tasks` defaults to a pilot-sized 10. The full retail split is 114 tasks and a 0.6B model
+    may well score zero on all of them, which would be the BFCL multi-turn power problem again but
+    with a metered API attached, so the pilot decides whether the full run is worth buying.
+    """
+    import json
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    server = _serve_vllm(tag)
+    run_name = f"{tag}_retail"
+    try:
+        command = [
+            "/root/.local/bin/uv", "run", "tau2", "run",
+            "--domain", "retail",
+            "--agent-llm", f"hosted_vllm/{tag}",
+            "--user-llm", user_llm,
+            "--num-trials", str(num_trials),
+            "--max-concurrency", str(concurrency),
+            "--save-to", run_name,
+        ]
+        if num_tasks:
+            command += ["--num-tasks", str(num_tasks)]
+        print(f"\n{'=' * 70}\n[tau2] {tag}: {num_tasks or 'all'} tasks x {num_trials}\n{'=' * 70}", flush=True)
+        subprocess.run(command, cwd="/opt/tau2", check=True)
+    finally:
+        server.terminate()
+
+    source = Path(f"/opt/tau2/data/simulations/{run_name}")
+    destination = Path(f"/work/tau2/{tag}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists():
+        shutil.rmtree(destination)
+    shutil.copytree(source, destination)
+    workspace.commit()
+
+    # The raw results are already safely on the volume by this point. Summarising is a convenience,
+    # so a schema guess that turns out wrong must not raise and discard a metered run.
+    try:
+        results = json.loads((destination / "results.json").read_text())
+        simulations = results.get("simulations", [])
+        rewards = [(s.get("reward_info") or {}).get("reward", 0.0) for s in simulations]
+        # TAU2_PREREGISTRATION.md commits to reporting these two apart: `sft` could gain on
+        # COMMUNICATE alone by being chattier, which is not the §3.1 reversal it would resemble.
+        breakdown: dict[str, list[float]] = {}
+        for simulation in simulations:
+            for key, value in ((simulation.get("reward_info") or {}).get("reward_breakdown") or {}).items():
+                if isinstance(value, (int, float)):
+                    breakdown.setdefault(key, []).append(float(value))
+        summary = {
+            "tag": tag,
+            "user_llm": user_llm,
+            "n": len(rewards),
+            "pass^1": sum(rewards) / len(rewards) if rewards else 0.0,
+            "solved": sum(1 for r in rewards if r >= 1.0),
+            "components": {k: sum(v) / len(v) for k, v in breakdown.items() if v},
+        }
+    except Exception as error:  # noqa: BLE001 - never lose a paid run to a parse error
+        summary = {"tag": tag, "error": repr(error), "raw": str(destination)}
+    print(f"[tau2] {json.dumps(summary)}", flush=True)
+    return summary
 
 
 @app.function(volumes=VOLUMES, timeout=1 * HOURS)
