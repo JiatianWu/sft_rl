@@ -167,14 +167,20 @@ what was typed. The round-by-round ledger is [FINDINGS.md](FINDINGS.md) §6; the
 0, inside the cap, and every round after it was a choice about where to spend a $30 budget. Four of
 those choices did most of the work.
 
-**Buy external validation before polishing internal numbers.** BFCL sat in the plan unexecuted while
-the in-domain table kept improving. Running it (round 3) is what converted "RL improved the model
-6.7×" into "the improvement does not leave the environment it was trained in" — it cost this project
-its headline and is the reason the document has a finding rather than a score.
+**Buy external validation before polishing internal numbers.** BFCL was scheduled in the plan and
+cut when the 4-hour cap ran out, then sat unrun for two days while the work went into the in-domain
+table: ablation arms, a benchmark bug, measured error bars. Every one of those made the numbers
+better or more trustworthy, and **not one of them could detect that all of them described a single
+self-written environment.** Running BFCL (round 3) returned no trained arm ahead of base on any
+category, and `parallel` at 0 of 200 against base's 0.725. That is what turned the deliverable from
+a score — 0.132 → 0.880 — into a finding: *in-domain RL gains of 6.7× do not leave the environment
+that produced them, and imitation destroys base capabilities that on-policy RL preserves.* The most
+valuable measurement here was the one most likely to invalidate the rest.
 
-**Ask what the model has never seen.** Every arm to that point had been trained and evaluated on one
-self-written environment, and the question of whether *anything* in the pipeline had shown the model
-a second domain is what opened rounds 4 through 7. Diversifying the SFT corpus repaired the parallel
+**Ask what the model has never seen.** BFCL established that the gains did not transfer; the useful
+follow-up was *why*, and the answer was that nothing anywhere in the pipeline — not the SFT corpus,
+not the environment — had ever shown the model a second domain or a turn with two calls in it. That
+question opened rounds 4 through 7. Diversifying the SFT corpus repaired the parallel
 collapse (§4d), then failed to pay for itself as an RL prior, and finally — once the corpus cap that
 made those two goals look exclusive was recognised as an artifact of the experiment rather than a
 budget — produced `grpo_1500`. **Data diversity was the lever that no amount of in-domain tuning
