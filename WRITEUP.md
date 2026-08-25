@@ -1,9 +1,10 @@
 # Multi-turn tool use on a 0.6B model: SFT → GRPO → eval
 
 **Model** `Qwen3-0.6B` · **Compute** Modal, single A10 · **Cost** $32.10 metered, $1.94 billed
-**Loop** closed inside the 4-hour cap; the rounds after it are logged in §6 of
-[FINDINGS.md](FINDINGS.md). Full detail, every number and every failed prediction live there — this
-is the 3-page version.
+
+The loop closed inside the 4-hour cap; the rounds after it are logged in [FINDINGS.md](FINDINGS.md)
+§6, which also holds every number, transcript and refuted prediction behind what follows. This is the
+condensed version.
 
 ## 1. The result
 
@@ -11,14 +12,14 @@ Six checkpoints, identical decoding (T=0.7, top-p 0.95, fixed seed), **2,400 hel
 each** (600 tasks × 4 trials). Test seeds are disjoint from training seeds. Error bars are
 *measured*, by evaluating every checkpoint twice: **±0.01 headline, ±0.05 per family.**
 
-| | Base | + SFT | RL only (30) | SFT+RL (30) | RL only (200) | **SFT-1500+RL** |
+| | Base | + SFT | RL only (30) | SFT+RL (30) | RL only (200) | **`grpo_1500`** |
 |---|---|---|---|---|---|---|
 | **pass^1** | 0.132 | 0.035 | 0.496 | 0.797 | *0.929* | **0.880** |
 | looked up before writing | 0.14 | 0.42 | 0.94 | 1.00 | **0.02** | **1.00** |
 
-The loop works: 0.132 → 0.880 in its own environment, a 6.7× gain. **Every other section of this
-document is about why that sentence is less impressive than it sounds**, which is the part of the
-exercise I found worth the time.
+The loop works: 0.132 → 0.880 in its own environment, a 6.7× gain, with `grpo_1500` the best arm
+that is not exploiting the reward. **Every other section of this document is about why that sentence
+is less impressive than it sounds**, which is the part of the exercise I found worth the time.
 
 ## 2. Environment and reward
 
@@ -176,4 +177,4 @@ would have silently falsified every number in §4(d).
 **Keep the full record; condense last.** The long version was written first and deliberately not
 trimmed while results were still arriving, which is why refuted predictions (P17, P21, P23) survive
 in the pre-registration files instead of being quietly reshaped into the ones that held. This
-three-page document is the last step, not the first draft.
+document is the last step, not the first draft.
