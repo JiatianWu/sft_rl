@@ -594,12 +594,11 @@ where retail protocol matters rather than general tool syntax, and precisely wha
 APIGen trajectories carried. So SFT's value as an initialisation was never "SFT" in the abstract;
 it was *domain-matched* trajectories, and half of them is not half as good.
 
-That reframes §3.7. Restoring parallel calling and preserving the RL prior are not independent
-knobs to be set separately — under a fixed corpus size they trade against each other directly, and
-this experiment bought 0.357 of pooled AST for 0.322 of in-domain `pass^1`. The obvious response
-is to stop holding the total at 1,000, which was a control for this comparison and not a budget
-constraint; 1,000 APIGen plus 500 Hermes costs another twenty minutes of GPU and is the run I
-would do next.
+That looks like it reframes §3.7 as a dilemma — parallel calling and the RL prior trading directly,
+0.357 of pooled AST bought with 0.322 of in-domain `pass^1`. **§3.11 shows that reading is wrong,
+and the trade was an artifact of my own control.** The 1,000-trajectory cap existed so composition
+would be the only variable; under it, adding Hermes necessarily removes the APIGen that carries
+retail protocol. Lift the cap and both goals are available at once.
 
 **Anchoring survived, which was not expected.** P9 predicted lookup compliance would fall, on the
 theory that §3.3's perfect compliance was a side effect of SFT's timidity — and `sft_mixed` traded
@@ -753,6 +752,64 @@ The fix is not a better reward term but a wider distribution of irrelevance — 
 inventories, requests that are plausible-but-unserveable rather than obviously off-topic — which is
 a data problem, not a scoring one.
 
+### 3.11 The dilemma was my control talking
+
+§3.8 concluded that repairing parallel calling costs the whole of SFT's value as an RL prior, and
+§3.10 sat on top of that as a second trade. Both rest on a comparison in which the corpus total was
+pinned at 1,000 trajectories — deliberately, so that composition would be the only variable. But a
+control is not a budget. Under a fixed total, adding 500 Hermes trajectories *necessarily* removes
+500 APIGen ones, and §3.8 established that the removed APIGen is precisely what carries retail
+protocol. The dilemma might be a property of the models, or it might be a property of my
+experimental design, and those are distinguishable for twenty minutes of GPU.
+
+`sft_1500` keeps all 1,000 APIGen trajectories and *adds* 500 Hermes on top. `grpo_1500` then runs
+30 GRPO steps from it, matching `grpo` and `grpo_mixed` step for step.
+
+| | RL only (30) | SFT+RL (30) | SFT mixed + RL | **SFT 1500 + RL** |
+|---|---|---|---|---|
+| **in-domain `pass^1`** | 0.496 | 0.797 | 0.475 | **0.880** |
+| looked up before writing | 0.94 | 1.00 | 1.00 | **1.00** |
+| `cancel_order` | 0.54 | 0.66 | 0.23 | **0.98** |
+| `return_items` | 0.91 | 1.00 | 0.16 | **1.00** |
+| `refuse_invalid` | 0.00 | 0.87 | 0.77 | **0.96** |
+| `exchange_items` *(held out from RL)* | 0.59 | 0.55 | 0.23 | 0.48 |
+| BFCL `parallel` | 0.715 | **0.000** | 0.705 | **0.695** |
+| BFCL AST pooled | 0.795 | 0.493 | 0.755 | **0.759** |
+
+**There was never a trade.** `grpo_1500` reaches **0.880**, above the 0.797 that the substitution
+was supposed to have cost, while keeping `parallel` at 0.695 and pooled AST at 0.759 — the best AST
+of any GRPO arm. **P15 and P16 confirmed**, P15 more strongly than predicted (I said 0.65–0.80). It
+is also not a reward hack: lookup compliance is 1.000, and it beats `grpo` on five of six families,
+including `cancel_order` 0.66 → 0.98 and `refuse_invalid` 0.87 → 0.96. At 30 steps it edges out
+`grpo_long`'s 0.868 at 200. **This is the best genuine agent in the project.**
+
+The one place it does not win is `exchange_items`, the family held out of RL entirely: 0.48 against
+`grpo`'s 0.55. Worth naming rather than burying, since that is the family that measures whether RL
+improved the protocol generally or only the families it was paid for.
+
+**What this costs is somewhere else entirely, and it is severe.**
+
+| | Base | SFT+RL (30) | SFT mixed + RL | + abstention | **SFT 1500 + RL** |
+|---|---|---|---|---|---|
+| **BFCL restraint pooled** | 0.798 | 0.636 | 0.460 | 0.545 | **0.235** |
+| should NOT call | 0.801 | 0.634 | 0.454 | 0.541 | **0.225** |
+| should call | 0.625 | 0.750 | 0.875 | 0.812 | **0.938** |
+
+`grpo_1500` is the most extreme point on the act/abstain axis measured anywhere in this project:
+best-in-class at calling when calling is right (0.938, above base's 0.625) and **less than a third
+as good as base at staying silent** (0.225 against 0.801). Restraint is half what the capped mix
+achieved, which was already the worst arm at the time. **P17 refuted** — I predicted the larger
+APIGen share would pull *back* toward abstention, since APIGen is the abstemious source, and
+`sft_1500` instead abstains worse than `sft_mixed` (0.564 against 0.642) before RL halves it again.
+
+So the honest correction is two-sided. §3.7's repair and §3.8's prior are not in tension and I
+should not have said they were; that was my control, not the model. But the act/abstain axis is a
+genuine constraint that every single intervention in this project has pushed the same way, and the
+best in-domain agent is the worst abstainer. §3.10 showed that axis is separately addressable — the
+abstention family bought +0.087 of restraint for 0.039 of `pass^1` — so the run that is actually
+worth doing next is `sft_1500` plus the abstention family together. That combination is untested,
+and it is the only configuration in which the project's best agent might also be a safe one.
+
 ---
 
 ## 4. Engineering findings
@@ -801,11 +858,16 @@ changed the design:
   external category, and the SFT arms lose 0.436 AST accuracy — including parallel calling
   falling to exactly zero. The in-domain result stands as a measurement of the environment it
   was trained for and nothing wider.
-- **The one experiment that repaired transfer cost the whole reason for running SFT** (§3.8).
-  Mixing in parallel-call data recovers 82% of the AST damage and survives RL, but GRPO from the
-  mixed prior reaches 0.475 against 0.797 from the original — no better than no prior at all.
-  Holding the corpus at 1,000 trajectories was a control, and it forced the two goals to trade;
-  whether they still trade at 1,500 is untested and is the first thing I would run.
+- **I reported a trade that did not exist, because I never questioned my own control** (§3.8 vs
+  §3.11). Holding the corpus at 1,000 trajectories made repairing parallel calling look like it
+  cost the whole of SFT's value as an RL prior. Lifting the cap gives 0.880 — better than the 0.797
+  supposedly lost — with parallel calling intact. The result was wrong for a full iteration, and
+  nothing in the data flagged it: the numbers were correct, the comparison was sound, and the
+  conclusion drawn from it was still an artifact of a design decision I had stopped seeing.
+- **The best agent is the worst abstainer, and that trade is real** (§3.11). `grpo_1500` reaches
+  0.880 in-domain and 0.225 on BFCL should-not-call, against base's 0.801. Every intervention in
+  this project pushed the same way on that axis. §3.10 shows it is separately addressable, but the
+  combination that would test it — `sft_1500` plus the abstention family — was not run.
 - **The RL environment actively trains against abstention** (§3.9). Ordering the arms by
   should-not-call recovers should-call in near-reverse, and the final arm is the worst abstainer
   measured (0.454 against base's 0.801). My first explanation — that nothing pays for abstention —

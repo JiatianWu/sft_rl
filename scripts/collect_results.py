@@ -28,6 +28,10 @@ TAGS = [
     # `irrelevant_request`. Reported on the unchanged six-family split, so the comparison is like
     # for like; the abstention family itself is scored separately under `grpo_abstain_abstain`.
     ("grpo_abstain", "+ abstention family"),
+    # The cap lifted: all 1,000 APIGen trajectories kept, 500 Hermes added on top rather than
+    # substituted. `grpo_1500` matches `grpo` and `grpo_mixed` step for step.
+    ("sft_1500", "+ SFT 1500"),
+    ("grpo_1500", "+ SFT 1500 + GRPO"),
 ]
 
 HEADLINE = [

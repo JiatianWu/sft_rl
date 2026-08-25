@@ -1,0 +1,33 @@
+{
+  "pass^1": 0.019166666666666665,
+  "pass^2": 0.017777777777777778,
+  "pass^3": 0.017083333333333332,
+  "pass^4": 0.016666666666666666,
+  "r_action": 0.18625,
+  "r_output": 0.4716666666666667,
+  "r_outcome": 0.019166666666666665,
+  "r_progress": 0.18625,
+  "n_calls": 1.1495833333333334,
+  "n_redundant": 0.007083333333333333,
+  "n_failed": 0.010833333333333334,
+  "n_illegal_writes": 0.0016666666666666668,
+  "n_malformed": 0.0,
+  "n_unknown_tool": 0.0,
+  "called_any_tool": 0.5983333333333334,
+  "reward": 0.07254166666666667,
+  "per_family_success": {
+    "cancel_order": 0.0,
+    "modify_address": 0.115,
+    "return_items": 0.0,
+    "exchange_items": 0.0,
+    "lookup_and_report": 0.0,
+    "refuse_invalid": 0.0
+  },
+  "n_episodes": 2400,
+  "n_tasks": 600,
+  "tag": "sft_1500",
+  "adapter": "/work/checkpoints/sft_1500",
+  "trials": 4,
+  "temperature": 0.7,
+  "elapsed_s": 267.8
+}

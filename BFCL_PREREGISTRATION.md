@@ -241,6 +241,31 @@ abstemious source. Weak, and stated so a shift cannot be presented as a surprise
 most quotable finding in those sections needs rewriting rather than defending. Stating that here,
 before the run, is the point.
 
+## Follow-up 4 outcome: P15–P17
+
+| prediction | verdict |
+|---|---|
+| **P15** `grpo_1500` well above 0.475 and 0.496 | **confirmed** — 0.880, above even `grpo`'s 0.797 |
+| **P16** `parallel` stays above 0.5 | **confirmed** — 0.695 |
+| **P17** `sft_1500` abstains better than `sft_mixed` | **refuted** — 0.564 against 0.642 |
+
+**The dilemma was my control talking.** Keeping all 1,000 APIGen and adding 500 Hermes on top gives
+0.880 in-domain — better than the 0.797 the substitution was supposed to have cost — while holding
+`parallel` at 0.695 and pooled AST at 0.759, the best of any GRPO arm. Lookup compliance is 1.000,
+so it is not the §3.3 hack, and it beats `grpo` on five of six families. Parallel calling and the
+RL prior never traded; a fixed corpus total made them appear to. The rewrite is in §3.11, and the
+claim it replaces was mine.
+
+**P17's refutation is the cost, and it is worse than the prediction was.** More APIGen did not pull
+back toward abstention: `sft_1500` abstains worse than `sft_mixed` (0.564 vs 0.642), and after RL
+`grpo_1500` reaches **0.225** should-not-call against base's 0.801 — half the capped arm's already
+poor 0.460, and the most extreme act/abstain point measured anywhere here. The best agent in the
+project is its worst abstainer, and the two facts have the same cause.
+
+§3.10 showed that axis is separately addressable, so the run worth doing next is `sft_1500` plus
+the abstention family together — the only untested configuration in which the best agent might also
+be a safe one.
+
 Added after the run. Full numbers and discussion in `WRITEUP.md` §3.6; reproduce with
 `python scripts/bfcl_table.py`.
 

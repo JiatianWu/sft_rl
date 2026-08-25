@@ -29,7 +29,8 @@ Three findings, none visible from the headline number alone:
   scratch and 0.797 from the SFT adapter. Worthless as a policy, decisive as an initialisation.
 - **The top score, 0.929, is a reward hack.** RL-only at 200 steps skips user identification
   in 98.4% of write episodes and fires the write with the id leaked in the prompt. The best
-  genuine agent is **SFT+RL at 30 steps, 0.797**.
+  genuine agent in this table is **SFT+RL at 30 steps, 0.797** — later beaten by **0.880**, once a
+  control of mine turned out to be costing more than it measured (§3.11, below).
 
 A fourth finding came out of the tables rather than the models: `return_items` read exactly
 0.93 in three independently trained arms, which turned out to be a benchmark bug making 1.2%
@@ -86,9 +87,28 @@ question that actually mattered — whether SFT is still worth running:
 
 **The +0.301 is gone entirely** — no better than starting cold. `return_items` falls to 0.16 from
 1.00, and the write-heavy families are exactly what the 500 removed APIGen trajectories carried.
-SFT's value as an initialisation was never "SFT"; it was *domain-matched* trajectories, and holding
-the corpus at 1,000 made the two goals trade directly against each other. Next run: 1,000 APIGen
-plus 500 Hermes, twenty more minutes of GPU.
+SFT's value as an initialisation was never "SFT"; it was *domain-matched* trajectories.
+
+### …because the trade was an artifact of my own control
+
+Holding the corpus at 1,000 made the two goals look mutually exclusive. That cap existed so
+composition would be the only variable — but a control is not a budget. Keeping all 1,000 APIGen
+and *adding* 500 Hermes:
+
+| | RL only | SFT+RL | SFT mixed+RL | **SFT 1500 + RL** |
+|---|---|---|---|---|
+| in-domain `pass^1` | 0.496 | 0.797 | 0.475 | **0.880** |
+| BFCL `parallel` | 0.715 | **0.000** | 0.705 | **0.695** |
+| BFCL AST | 0.795 | 0.493 | 0.755 | **0.759** |
+
+**0.880 — better than the 0.797 the substitution was supposed to have cost, with parallel calling
+intact.** Lookup compliance 1.000, so not the §3.3 hack; it beats `grpo` on five of six families
+and edges out the 200-step arm at 30 steps. **This is the best genuine agent in the project**, and
+it exists because I questioned my own control rather than the models.
+
+The cost is on a different axis, and it is severe: **should-not-call falls to 0.225** against base's
+0.801, the most extreme point measured here. The best agent is the worst abstainer.
+[WRITEUP.md](WRITEUP.md) §3.11.
 
 One dial explains most of the project. Order the six arms by how well they abstain and the
 willingness-to-call column comes back in near-perfect reverse; every intervention moved it, none on

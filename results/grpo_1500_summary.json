@@ -1,0 +1,33 @@
+{
+  "pass^1": 0.88,
+  "pass^2": 0.8741666666666666,
+  "pass^3": 0.8708333333333333,
+  "pass^4": 0.8683333333333333,
+  "r_action": 0.9591666666666666,
+  "r_output": 0.9058333333333334,
+  "r_outcome": 0.88,
+  "r_progress": 0.9625,
+  "n_calls": 3.158333333333333,
+  "n_redundant": 0.037083333333333336,
+  "n_failed": 0.28458333333333335,
+  "n_illegal_writes": 0.18416666666666667,
+  "n_malformed": 0.007083333333333333,
+  "n_unknown_tool": 0.0,
+  "called_any_tool": 1.0,
+  "reward": 1.0786250000000002,
+  "per_family_success": {
+    "cancel_order": 0.98,
+    "modify_address": 0.9675,
+    "return_items": 1.0,
+    "exchange_items": 0.4825,
+    "lookup_and_report": 0.89,
+    "refuse_invalid": 0.96
+  },
+  "n_episodes": 2400,
+  "n_tasks": 600,
+  "tag": "grpo_1500",
+  "adapter": "/work/checkpoints/grpo_1500",
+  "trials": 4,
+  "temperature": 0.7,
+  "elapsed_s": 365.1
+}
