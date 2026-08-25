@@ -906,12 +906,14 @@ fire once outside it.
 ## 4. Engineering findings
 
 Full list in [`ENGINEERING_NOTES.md`](ENGINEERING_NOTES.md); each was found by running the
-producing code rather than trusting a doc, and each is pinned by a test. The four that
-changed the design:
+producing code rather than trusting a doc, and each is pinned by a test. Sorting the ones that
+changed the design turns out to sort them by how they announce themselves — **three that stay
+green while being wrong, four that fail loudly but blame the wrong thing, and one that was not a
+bug at all but a purchase about to be made on the wrong axis.** None of the three is caught by
+reading the logs: the first stays green, the second lies, and the third never produces a line.
 
-- **TRL's `environment_factory` evaluates every property on a freshly built environment**
-  before calling `reset`, so an environment that is invalid until reset crashes during
-  *trainer construction*, not at rollout time.
+**Silent — the run succeeds and the number is wrong.**
+
 - **Qwen3's template has no `{% generation %}` marker**, so `assistant_only_loss` is
   unusable and masking is manual. Getting it wrong is silent: training on tool-response
   tokens teaches the model to *generate* database contents, the exact hallucination the
@@ -922,15 +924,28 @@ changed the design:
   side of the conversation: τ-bench's Qwen3.6 customer spent its entire token budget reasoning and
   returned **empty content**, which would have blanked every customer turn and scored as the agent
   failing to make progress.
+- **A test whose fixture is derived from the thing under test proves nothing** (§3.4). The
+  most load-bearing assertion in the repo was half circular and stayed green on 28 unsolvable
+  tasks.
+
+**Misattributed — it fails, and the failure points somewhere else.**
+
+- **TRL's `environment_factory` evaluates every property on a freshly built environment**
+  before calling `reset`, so an environment that is invalid until reset crashes during
+  *trainer construction*, not at rollout time.
+- **A Modal spend limit is reported as "waiting for capacity",** and it is not the credit
+  balance: $1.40 of ~$30 had been spent when everything stopped. Transient scarcity, a dead
+  budget and a settings cap all look identical in the logs.
 - **A zero reward and an unscored run are not the same thing.** τ-bench leaves `reward_basis` and
   `db_check` null when a conversation ends on `max_steps` or an error, while `reward` still defaults
   to `0.0`. Averaging naively fabricates a clean `pass^1 = 0.000` out of runs no evaluator ever saw.
 - **Secrets must not travel on argv.** `CalledProcessError` prints the entire command line into the
   logs, so a Modal proxy token passed through `--user-llm-args` was leaked by a *failure* rather
-  than by the code path that used it. It now travels in the environment.
-- **A Modal spend limit is reported as "waiting for capacity",** and it is not the credit
-  balance: $1.40 of ~$30 had been spent when everything stopped. Transient scarcity, a dead
-  budget and a settings cap all look identical in the logs.
+  than by the code path that used it — the error handler, not the code path under test. It now
+  travels in the environment.
+
+**Neither — a cost decision that no error would ever have surfaced.**
+
 - **Concurrency was the throughput lever; a bigger GPU would have been the wrong purchase.**
   A 0.6B model is 1.2 GB of weights against an A10's 600 GB/s, so at BFCL's default of 8 in-flight
   requests each one took ~4s with the GPU essentially idle and ~19 GB of KV cache unused — the
@@ -939,9 +954,6 @@ changed the design:
   **2.3x for free**; running the independent arms as parallel Modal containers took the eight-job
   sweep from over an hour to **24 minutes at identical GPU-seconds**. An H100 costs 3.6x/hour to buy
   back per-token latency, which is the one thing that was not the bottleneck.
-- **A test whose fixture is derived from the thing under test proves nothing** (§3.4). The
-  most load-bearing assertion in the repo was half circular and stayed green on 28 unsolvable
-  tasks.
 
 ---
 
