@@ -221,8 +221,25 @@ modal run modal_app.py::bfcl_sweep --jobs "base:simple_python;sft:simple_python"
 python scripts/bfcl_table.py                 # per-category table, CIs, significance
 ```
 
-`bfcl_sweep` fans the arms out across parallel containers, one GPU each: identical GPU-seconds,
-wall clock divided by the number of arms.
+**Concurrency, not a bigger GPU, was the throughput lever.** Qwen3-0.6B is 1.2 GB of weights
+against an A10's 600 GB/s, so at BFCL's default of 8 in-flight requests each took ~4s with the GPU
+idle and ~19 GB of KV cache unused — latency-bound at low concurrency, never compute-bound. The cap
+lives in BFCL's own `ThreadPoolExecutor(max_workers=num_threads)`; raising it to 64 gave **2.3x for
+free**, and fanning the independent arms across parallel containers took the eight-job sweep from
+over an hour to **24 minutes at identical GPU-seconds**. An H100 costs 3.6x/hour to buy back
+per-token latency, which was the one thing not in the way.
+
+τ-bench retail needs a third image and a *separate* server for the customer, because LiteLLM
+resolves `hosted_vllm/` against a single global API base — leave it unset and the benchmark quietly
+swaps its customer for the checkpoint under test:
+
+```bash
+modal run modal_app.py::tau2_probe      # confirm the agent emits parsed tool calls
+modal run modal_app.py::tau2_user_probe # confirm the customer answers in character
+modal run modal_app.py::tau2_sweep --tags "base,sft,grpo,grpo_1500" --task-ids "$(seq -s, 10 49)"
+python scripts/tau2_table.py            # solved/usable, loop rate, ask rate
+python scripts/tau2_p21.py              # per-task-kind breakdown behind §3.12
+```
 
 Individual stages (`prepare`, `sft`, `grpo`, `evaluate`) remain callable for debugging.
 `TOOLUSE_GPU` selects the accelerator, defaulting to `A10` — the largest tier reachable on a

@@ -931,6 +931,14 @@ changed the design:
 - **A Modal spend limit is reported as "waiting for capacity",** and it is not the credit
   balance: $1.40 of ~$30 had been spent when everything stopped. Transient scarcity, a dead
   budget and a settings cap all look identical in the logs.
+- **Concurrency was the throughput lever; a bigger GPU would have been the wrong purchase.**
+  A 0.6B model is 1.2 GB of weights against an A10's 600 GB/s, so at BFCL's default of 8 in-flight
+  requests each one took ~4s with the GPU essentially idle and ~19 GB of KV cache unused — the
+  workload was latency-bound at low concurrency, never compute-bound. Reading BFCL's own source for
+  where the cap lives (`ThreadPoolExecutor(max_workers=num_threads)`) and raising it to 64 gave
+  **2.3x for free**; running the independent arms as parallel Modal containers took the eight-job
+  sweep from over an hour to **24 minutes at identical GPU-seconds**. An H100 costs 3.6x/hour to buy
+  back per-token latency, which is the one thing that was not the bottleneck.
 - **A test whose fixture is derived from the thing under test proves nothing** (§3.4). The
   most load-bearing assertion in the repo was half circular and stayed green on 28 unsolvable
   tasks.
