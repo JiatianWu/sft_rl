@@ -120,19 +120,17 @@ is separable — but the fix saturates in-domain at 400/400 while closing only 2
 ## 6. Engineering findings
 
 Eight are listed in [ENGINEERING_NOTES.md](ENGINEERING_NOTES.md), and they sort by how they announce
-themselves — **three that stay green while wrong, four that fail loudly but blame the wrong thing,
-one that was never a bug.** None is caught by reading the logs: the first stays green, the second
-lies, the third never produces a line. One of each:
+themselves — **three that stay green while wrong** (Qwen3's template has no `{% generation %}`
+marker, so botched masking silently trains the model to *generate* database contents), **four that
+fail loudly but blame the wrong thing** (a Modal spend limit surfaces as "waiting for capacity"),
+**and one that was never a bug at all.** None is caught by reading the logs: the first stays green,
+the second lies, the third never produces a line.
 
-- **Silent.** Qwen3's template has no `{% generation %}` marker, so `assistant_only_loss` is unusable
-  and masking is manual — and getting it wrong trains the model to *generate* database contents, the
-  exact hallucination the environment punishes.
-- **Misattributed.** A Modal spend limit surfaces as "waiting for capacity", indistinguishable in the
-  logs from real scarcity, a dead budget, or a settings cap.
-- **Neither.** Concurrency, not a bigger GPU, was the throughput lever: 1.2 GB of weights against an
-  A10's 600 GB/s is latency-bound at low concurrency, never compute-bound. Raising BFCL's own thread
-  cap to 64 gave 2.3× free and container fan-out cut a sweep to 24 minutes at identical GPU-seconds,
-  where an H100 costs 3.6×/hour to buy back the one thing not in the way.
+That last one was a purchase about to be made on the wrong axis. **Concurrency, not a bigger GPU, was
+the throughput lever**: 1.2 GB of weights against an A10's 600 GB/s is latency-bound at low
+concurrency, never compute-bound. Raising BFCL's own thread cap to 64 gave 2.3× free and fanning the
+arms across containers cut a sweep to 24 minutes at identical GPU-seconds, where an H100 costs
+3.6×/hour to buy back the one thing that was not in the way.
 
 ## 7. Limitations
 
@@ -157,3 +155,25 @@ lies, the third never produces a line. One of each:
 4. **Instrument for hacking by default, and audit fixtures for circularity.** The compliance metric
    that exposed §4(b) was written *after* the run that needed it — rising success with a falling call
    count should be an alarm, not progress.
+
+## 9. How the work was directed
+
+Written with an AI coding agent, which makes the interesting question what was *decided* rather than
+what was typed. The round-by-round ledger is [FINDINGS.md](FINDINGS.md) §6; the loop closed in round
+0, inside the cap, and every round after it was a choice about where to spend a $30 budget. Three of
+those choices did most of the work.
+
+**Buy external validation before polishing internal numbers.** BFCL sat in the plan unexecuted while
+the in-domain table kept improving. Running it (round 3) is what converted "RL improved the model
+6.7×" into "the improvement does not leave the environment it was trained in" — it cost this project
+its headline and is the reason the document has a finding rather than a score.
+
+**Never pay for a measurement without a free rehearsal.** The metered τ-bench run was preceded by a
+zero-cost dry run pointing the user simulator at the local server. It measured nothing and caught two
+harness bugs, one of which — τ-bench reporting `reward = 0.0` for conversations it never scored —
+would have silently falsified every number in §4(d).
+
+**Keep the full record; condense last.** The long version was written first and deliberately not
+trimmed while results were still arriving, which is why refuted predictions (P17, P21, P23) survive
+in the pre-registration files instead of being quietly reshaped into the ones that held. This
+three-page document is the last step, not the first draft.
