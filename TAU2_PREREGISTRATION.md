@@ -199,6 +199,70 @@ undoing the fix. It is equally consistent with looping being generic repetition 
 with nothing. P23 is what tells these apart, and it is the reason the mechanism is measured
 directly rather than inferred from termination reasons.
 
+## Follow-up 5 outcome: P22–P24 on tasks 10–49
+
+| prediction | verdict |
+|---|---|
+| **P22** `sft` loops < 0.45, `grpo_1500` > 0.75 | **confirmed** — 0.394 and 0.850, *p* = 0.00007 |
+| **P23** `sft` asks > 2× `grpo_1500`, asking tracks looping | **refuted** — 1.42×, and `base` breaks the ordering |
+| **P24** `grpo` between `sft` and `grpo_1500`, nearer the latter | **confirmed** — 0.718, and `sft`→`grpo` is *p* = 0.008 |
+
+**The pilot's most quotable number was noise, and fresh tasks killed it.** The pilot had `sft`
+looping 2/10 against `base`'s 7/10, which read as SFT fixing the behaviour. On 40 tasks the two are
+0.394 and 0.424 — *p* = **1.00000**. SFT does not reduce looping at all. Running this on data the
+claim had never seen is the only reason that is known.
+
+**What survives is a cleaner claim than the one I set out to test.** Along the SFT→RL lineage both
+quantities move monotonically, and in opposite directions:
+
+| arm | loops to death | asks the customer | in-domain `pass^1` |
+|---|---|---|---|
+| `base` | 0.424 | 0.213 | 0.132 |
+| `sft` | 0.394 | **0.422** | 0.035 |
+| `grpo` | 0.718 | 0.348 | 0.797 |
+| `grpo_1500` | **0.850** | 0.297 | **0.880** |
+
+SFT roughly doubles asking over `base` (0.213 → 0.422) without touching the loop rate. RL then
+walks asking back down and the loop rate up, step by step, and **the ordering is exactly the
+in-domain ranking reversed**. Thirty GRPO steps applied to the SFT checkpoint nearly double its
+loop rate (0.394 → 0.718, *p* = 0.008). That is P24, and it is the result that separates "RL broke
+it" from "SFT fixed something `base` lacked": SFT fixed nothing here, RL broke it.
+
+**P23's refutation is the useful part.** `base` asks least of all four arms (0.213) yet loops less
+than either RL arm, so asking cannot be the whole mechanism. The tidy §3.9 story — an environment
+that rewards acting and punishes deferring produces an agent that retries instead of asking —
+holds *within* the SFT→RL lineage and fails across it. Asking is one lever, not the lever, and the
+pre-registered refutation condition is what forced that qualification rather than letting the neat
+version stand.
+
+**The headline, on the honest denominator.**
+
+| arm | solved / usable | in-domain `pass^1` |
+|---|---|---|
+| `base` | 3/33 = **0.091** | 0.132 |
+| `sft` | 3/33 = **0.091** | 0.035 |
+| `grpo` | 1/39 = 0.026 | 0.797 |
+| `grpo_1500` | 1/40 = 0.025 | 0.880 |
+
+**The in-domain ranking is inverted.** `grpo_1500` is this project's best agent in its own
+environment by a factor of 6.7 over `base`, and on τ-bench retail it is the worst arm measured,
+roughly 3.6× behind the untrained model.
+
+**P18 is confirmed, on data that can finally test it.** In-domain `sft` trails `base` by 0.097
+(0.035 vs 0.132); here they are identical at 0.091. Give the model the user simulator whose absence
+§3.1 blamed, and SFT's deficit vanishes entirely. The caveat is 3 solved out of 33 either way, so
+this is consistent with P18 and underpowered to distinguish "closed" from "small and unmeasured".
+
+**P19 confirmed** — every arm below 0.15. **P20 confirmed and then some**: `grpo_1500` does not
+merely fail to lead, it trails. **P21 remains unevaluated**; it needs per-task refusal analysis.
+
+**A denominator that would have reversed the headline.** τ-bench scores only conversations that
+terminate normally, so averaging over *scored* simulations conditions on surviving — and surviving
+is precisely what differs between these arms. That inflates `grpo_1500` from 1/40 to 1/6 = 0.167,
+level with `sft`, making the worst arm look tied for best. A conversation that looped until the
+error limit did not solve its task. `scripts/tau2_table.py` now reports both and leads with
+solved/usable; the biased column is kept visible because it is the number a naive reading produces.
+
 ## What would make this uninformative
 
 **All arms scoring 0/114.** P19 already predicts very low scores, and there is a real chance they

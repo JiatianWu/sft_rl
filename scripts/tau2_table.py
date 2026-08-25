@@ -106,18 +106,32 @@ def main() -> None:
         print(f"no τ-bench results under {RESULTS}/")
         return
 
+    # The headline is solved/usable, not solved/scored. τ-bench only scores a conversation that
+    # terminated normally, so averaging over scored simulations silently conditions on surviving —
+    # and survival is exactly what differs between arms here. On tasks 10-49 that inflates
+    # grpo_1500 from 1/40 to 1/6, making the worst arm look tied for best. A conversation that
+    # looped until the error limit did not solve its task, so it belongs in the denominator.
     print("τ-bench retail\n")
-    header = f"{'arm':<22} {'sims':>5} {'scored':>7} {'pass^1':>16} {'solved':>7} {'normal stop':>12}"
+    header = (
+        f"{'arm':<22} {'sims':>5} {'usable':>7} {'solved/usable':>21} "
+        f"{'scored-only (biased)':>21} {'normal stop':>12}"
+    )
     print(header)
     print("-" * len(header))
     for _, label, data in rows:
-        if data["pass1"] is None:
-            score = "n/a"
+        usable = data["usable"]
+        if usable:
+            low, high = wilson(data["solved"], usable)
+            honest = f"{data['solved']}/{usable} = {data['solved'] / usable:.3f} [{low:.2f},{high:.2f}]"
         else:
-            low, high = wilson(data["solved"], data["scored"])
-            score = f"{data['pass1']:.3f} [{low:.2f},{high:.2f}]"
+            honest = "n/a"
+        biased = (
+            f"{data['solved']}/{data['scored']} = {data['pass1']:.3f}"
+            if data["scored"]
+            else "n/a"
+        )
         stop = f"{data['normal_stop']}/{data['n']}"
-        print(f"{label:<22} {data['n']:>5} {data['scored']:>7} {score:>16} {data['solved']:>7} {stop:>12}")
+        print(f"{label:<22} {data['n']:>5} {usable:>7} {honest:>21} {biased:>21} {stop:>12}")
 
     print("\nP22 loop-to-death rate and P23 asking rate (infrastructure errors excluded)")
     header = f"{'arm':<22} {'usable':>7} {'looped':>16} {'asked at all':>16} {'ask rate':>10}"
