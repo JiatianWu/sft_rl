@@ -161,16 +161,24 @@ generalised. Crucially it has the **user simulator** whose absence §3.1 blamed 
 | asks the customer | 0.213 | **0.422** | 0.348 | 0.297 |
 | in-domain `pass^1` | 0.132 | 0.035 | 0.797 | **0.880** |
 
-**The best in-domain agent is the worst here.** More RL monotonically lowers how often the model
-asks the customer anything and raises how often it loops on invented arguments until the error limit
-fires — the in-domain ranking, reversed. Thirty GRPO steps on the SFT checkpoint nearly double its
-loop rate (p=0.008). And **§3.1 is vindicated**: SFT's 0.097 in-domain deficit against base vanishes
-to exactly zero once the user simulator it was trained to talk to exists.
+**Every arm solves 0 of the 35 tasks that require a database write.** All eight solves in the run
+are the three tasks whose correct end state is an *unchanged* DB — so the `pass^1` row measures
+avoidance of damage, not capability, and two of base's three were earned by firing a forbidden write
+six or seven times and having the API reject every one. `db_check` compares a hash, so a blocked
+write and a correct refusal score identically: **§3.3's failure mode, in a benchmark I did not
+write.**
 
-Two near-misses are documented rather than buried. A 10-task pilot showed SFT curing the looping
-(2/10 vs 7/10); on 40 fresh tasks that is p=1.00000 and false. And τ-bench only scores conversations
-that end normally, so averaging over *scored* runs conditions on surviving — which inflates the
-worst arm from 1/40 to 1/6 and makes it look tied for best. [WRITEUP.md](WRITEUP.md) §3.12.
+What survives is behavioural, needs no reward, and uses all 40 tasks. More RL lowers asking, raises
+looping (p=0.008 for one SFT→RL step), and **eliminates escalation** — the RL arms call
+`transfer_to_human_agents` zero times where base manages 3/5, yet `grpo_1500` scores 0.99 in-domain
+on `refuse_invalid`, a family requiring that exact call. The restraint §3.10 trained does not fire
+outside the environment that trained it. And **§3.1 is vindicated**: SFT's 0.097 in-domain deficit
+against base vanishes once the user simulator it was trained to talk to exists.
+
+Three near-misses are documented rather than buried: a pilot result that fresh tasks reduced to
+p=1.00000; a denominator that conditions on surviving and inflates the worst arm from 1/40 to 1/6;
+and a user simulator that invents order ids in ~7.5% of conversations, implicated in two of the
+solves above. [WRITEUP.md](WRITEUP.md) §3.12.
 
 ## The loop
 

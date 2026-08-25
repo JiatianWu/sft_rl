@@ -34,12 +34,14 @@ corpus and my environment are one-call-per-turn. RL-only, by contrast, preserves
 real gain in the environment it was trained for, bought with general capability that no
 in-domain metric could see.
 
-**On τ-bench retail — the benchmark this environment is a simplification of — the ranking
-inverts.** With a real user simulator present, the best in-domain agent (`grpo_1500`, 0.880) is the
-*worst* arm measured, solving 1/40 against base's 3/33, while more RL monotonically reduces how
-often the model asks the customer anything and raises how often it loops on its own invented
-arguments until the error limit fires (§3.12). The same run vindicates §3.1: SFT's in-domain deficit
-against base vanishes entirely once the user simulator it was trained to talk to actually exists.
+**On τ-bench retail — the benchmark this environment is a simplification of — what RL bought does
+not appear at all.** Every arm solves **0 of 35** tasks requiring a database write, so the run
+measures avoidance of damage rather than capability, and the surviving result is behavioural: more
+RL monotonically reduces how often the model asks the customer anything, raises how often it loops
+on its own invented arguments until the error limit fires, and **eliminates escalation entirely** —
+the RL arms never once call `transfer_to_human_agents`, though `grpo_1500` scores 0.99 in-domain on
+a family that requires exactly that call (§3.12). The same run vindicates §3.1: SFT's in-domain
+deficit against base vanishes once the user simulator it was trained to talk to actually exists.
 
 The through-line is that every headline number here was misleading in isolation, and what
 made the run interpretable was cheap instrumentation — per-episode records, an error taxonomy,
@@ -869,6 +871,35 @@ SFT cures nothing. And **τ-bench scores only conversations that terminate norma
 over *scored* simulations conditions on surviving — which is precisely what differs between these
 arms. That inflates `grpo_1500` from 1/40 to 1/6 = 0.167, level with `sft`, making the worst arm
 look tied for best. A conversation that looped until the error limit did not solve its task.
+
+**And the `pass^1` column does not survive being looked at closely.** Classifying the 40 tasks by
+gold action — refusal iff the gold terminates in `transfer_to_human_agents` — gives 3 refusal, 2
+read-only, 35 write, and then (`scripts/tau2_p21.py`):
+
+| arm | refusal (3) | write (35) | read-only (2) | escalated correctly |
+|---|---|---|---|---|
+| `base` | 2/3 | **0/35** | 1/2 | 3/5 |
+| `sft` | 2/3 | **0/35** | 1/2 | 2/5 |
+| `grpo` | 0/3 | **0/35** | 1/2 | **0/5** |
+| `grpo_1500` | 1/3 | **0/35** | 0/2 | **0/5** |
+
+**Every arm solves zero of 35 write tasks**, and all eight solves in the run are the three tasks
+whose correct end state is a DB that never changed. Worse, two of base's three were *earned by being
+blocked*: on task 12 it fired `cancel_pending_order` six times and the API rejected all six, on task
+10 seven rejected returns. `db_check` compares a hash, so a rejected write and a correct refusal are
+identical to it and both score 1.0 — **§3.3's failure mode, a reward that scores final state and
+never the policy, in a benchmark I did not write.** The customer is also a live confound at ~7.5%: it
+invented order ids in 3–4 of 40 conversations and sometimes answers in agent persona, and task 12's
+writes failed with "Order not found" precisely because it supplied a fictional order.
+
+So the honest scope of this section is narrower than its table. The `pass^1` ranking rests on 3
+solves against 1, on tasks that reward inaction, with a hallucinating counterpart implicated in two
+of them; it is not a capability measurement. What **is** solid is behavioural, needs no reward, and
+is measured on all 40 tasks: RL raises looping (*p* = 0.008 for one SFT→RL step), lowers asking, and
+**abandons escalation completely** — both RL arms call `transfer_to_human_agents` zero times where
+base manages 3/5, while `grpo_1500` scores 0.99 in-domain on `refuse_invalid`, a family that
+*requires* that exact call. The restraint §3.10 trained is intact in its own environment and does not
+fire once outside it.
 
 ---
 

@@ -254,7 +254,55 @@ roughly 3.6× behind the untrained model.
 this is consistent with P18 and underpowered to distinguish "closed" from "small and unmeasured".
 
 **P19 confirmed** — every arm below 0.15. **P20 confirmed and then some**: `grpo_1500` does not
-merely fail to lead, it trails. **P21 remains unevaluated**; it needs per-task refusal analysis.
+merely fail to lead, it trails. **P21 adjudicated below** (`scripts/tau2_p21.py`).
+
+## Follow-up 6 outcome: P21, and the thing it turned up by accident
+
+Classifying the 40 tasks by their gold action list — refusal iff the gold terminates in
+`transfer_to_human_agents`, τ-bench's analogue of the in-domain `refuse_invalid` family — gives 3
+refusal, 2 read-only, 35 write.
+
+**P21 is refuted, in the exact opposite direction to the prediction.** I predicted `grpo_1500` would
+write to the DB on refusal tasks and score 0 on precisely those. It writes on no-write tasks *least*
+of the four arms (1/5, against `base`'s 4/5), and refusal tasks are the **only** tasks it solves.
+
+| arm | refusal (3) | write (35) | read-only (2) | escalated correctly |
+|---|---|---|---|---|
+| `base` | 2/3 | **0/35** | 1/2 | 3/5 |
+| `sft` | 2/3 | **0/35** | 1/2 | 2/5 |
+| `grpo` | 0/3 | **0/35** | 1/2 | **0/5** |
+| `grpo_1500` | 1/3 | **0/35** | 0/2 | **0/5** |
+
+**The half of P21 that survives is the escalation column.** Both RL arms call
+`transfer_to_human_agents` **zero times** across all five no-write tasks, where `base` manages 3/5.
+In-domain, `grpo_1500` scores **0.99** on `refuse_invalid`, a family that *requires* exactly that
+call. So the abstention behaviour §3.10 trained is intact in-domain and does not fire once off it —
+a sharper transfer failure than the aggregate showed, and the per-task pattern P21 asked for, just
+not in the variable P21 named.
+
+**Every arm solves 0 of 35 write tasks. All 8 solves in the whole run are tasks 10, 12 and 25** —
+the ones whose correct end state is a DB that never changed. Nothing here demonstrates a 0.6B model
+completing a retail transaction; the run measures how reliably an arm avoids doing damage.
+
+**Two of `base`'s three solves were earned by being blocked.** On task 12 it attempted
+`cancel_pending_order` six times and the API rejected all six; on task 10, seven rejected
+`return_delivered_order_items` calls. `db_check` compares a hash, so a rejected write and a correct
+refusal are indistinguishable to it, and both score 1.0. That is **§3.3's exact failure mode — a
+reward that scores final state and never the policy — in a benchmark I did not write**, which is
+some comfort about §3.3 and none at all about the 0.091.
+
+**The user simulator is a live confound, at about 7.5%.** It invented order ids in 3/40, 3/40, 4/40
+and 0/40 conversations per arm (`#900028208827` where the DB holds `#W5490111`), and drifts into
+agent persona — on task 12 the *customer* says "Let me check the status of your order… I can cancel
+it". Task 12 is one of the solves above: `base`'s writes failed with "Order not found" because the
+customer supplied a fictional order. So the headline gap rests on 3 solves against 1, two of which
+trace to a hallucinating counterpart.
+
+**What this does and does not cost §3.12.** The `pass^1` column is weaker than it looked and should
+not be read as a capability ranking. The loop-rate result is untouched: it is measured on all 40
+tasks, needs no reward, and carries *p* = 0.00007 and *p* = 0.008. The behavioural findings — RL
+raises looping, lowers asking, and abandons escalation entirely — are what this run actually
+established.
 
 **A denominator that would have reversed the headline.** τ-bench scores only conversations that
 terminate normally, so averaging over *scored* simulations conditions on surviving — and surviving
