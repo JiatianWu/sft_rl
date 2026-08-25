@@ -34,9 +34,16 @@ corpus and my environment are one-call-per-turn. RL-only, by contrast, preserves
 real gain in the environment it was trained for, bought with general capability that no
 in-domain metric could see.
 
+**On τ-bench retail — the benchmark this environment is a simplification of — the ranking
+inverts.** With a real user simulator present, the best in-domain agent (`grpo_1500`, 0.880) is the
+*worst* arm measured, solving 1/40 against base's 3/33, while more RL monotonically reduces how
+often the model asks the customer anything and raises how often it loops on its own invented
+arguments until the error limit fires (§3.12). The same run vindicates §3.1: SFT's in-domain deficit
+against base vanishes entirely once the user simulator it was trained to talk to actually exists.
+
 The through-line is that every headline number here was misleading in isolation, and what
 made the run interpretable was cheap instrumentation — per-episode records, an error taxonomy,
-a compliance metric that moves opposite to success, and finally a benchmark I did not write.
+a compliance metric that moves opposite to success, and finally two benchmarks I did not write.
 
 ---
 
@@ -810,6 +817,59 @@ abstention family bought +0.087 of restraint for 0.039 of `pass^1` — so the ru
 worth doing next is `sft_1500` plus the abstention family together. That combination is untested,
 and it is the only configuration in which the project's best agent might also be a safe one.
 
+### 3.12 τ-bench: the in-domain ranking, inverted
+
+BFCL asked whether general tool-use capability transferred and answered no. τ-bench retail asks a
+narrower and, for this project, sharper question, because **`tau-retail-lite` is a simplification of
+it**. Seven of this environment's tool names — `find_user_id_by_email`, `get_order_details`,
+`cancel_pending_order` and four more — appear verbatim in τ-bench retail's schema. That makes it not
+an independent benchmark but a test of whether the simplification was faithful. Two things made it
+worth the money anyway. It has a **user simulator**, whose absence §3.1 blamed for SFT scoring 0.035
+against base's 0.132. And its reward is `DB × COMMUNICATE`, the same product of a state check and an
+output check that `compute_reward` arrived at independently.
+
+Setup: 40 tasks (ids 10–49), four arms, a Qwen3.6-27B customer on a Modal Endpoint held fixed across
+arms. Predictions P18–P24 were committed in [`TAU2_PREREGISTRATION.md`](TAU2_PREREGISTRATION.md)
+before any run.
+
+| arm | solved / usable | loops to death | asks the customer | in-domain `pass^1` |
+|---|---|---|---|---|
+| `base` | 3/33 = **0.091** | 0.424 | 0.213 | 0.132 |
+| `sft` | 3/33 = **0.091** | 0.394 | **0.422** | 0.035 |
+| `grpo` | 1/39 = 0.026 | 0.718 | 0.348 | 0.797 |
+| `grpo_1500` | 1/40 = 0.025 | **0.850** | 0.297 | **0.880** |
+
+**The ranking inverts.** `grpo_1500` leads its own environment by 6.7× over base and is the worst
+arm here, roughly 3.6× behind the untrained model. Along the SFT→RL lineage, asking falls
+monotonically and looping rises monotonically, in exactly the reverse of the in-domain order. Thirty
+GRPO steps applied to the SFT checkpoint nearly double its loop rate (0.394 → 0.718, *p* = 0.008),
+which is what distinguishes *RL broke this* from *SFT fixed something base lacked*.
+
+The failure is legible in a single transcript. Given "Hi, I'm Yusuf Rossi, I'm calling about order
+#W2378156", `grpo_1500` calls `find_user_id_by_email` with `"yusufrossi"`, then
+`find_user_id_by_name_zip` with a **fabricated** zip of `12345`, then repeats those two calls until
+the error limit fires — without once asking the customer for either field. The customer was
+available and willing to answer.
+
+**§3.1's diagnosis is vindicated, and P18 confirmed.** In-domain `sft` trails base by 0.097; here
+the two are identical at 0.091. Supply the user simulator whose absence was blamed, and SFT's
+deficit disappears. At 3 solved out of 33 either way this is consistent with P18 rather than a
+precise measurement of it.
+
+**P23 was refuted, and that is the part worth keeping.** I predicted asking would track looping
+across all four arms. It does not: `base` asks least of anything measured (0.213) yet loops less
+than either RL arm. So §3.9's tidy story — an environment that rewards acting and punishes deferring
+yields an agent that retries instead of asking — **holds within the SFT→RL lineage and fails across
+it**. Asking is one lever, not the lever. Only the pre-registered refutation condition forced that
+qualification; the neat version would otherwise have gone into this document unchallenged.
+
+Two things nearly went in wrong. A 10-task pilot had `sft` looping 2/10 against base's 7/10, which
+read as SFT curing the behaviour; on 40 fresh tasks the two are 0.394 and 0.424, *p* = 1.00000, and
+SFT cures nothing. And **τ-bench scores only conversations that terminate normally**, so averaging
+over *scored* simulations conditions on surviving — which is precisely what differs between these
+arms. That inflates `grpo_1500` from 1/40 to 1/6 = 0.167, level with `sft`, making the worst arm
+look tied for best. A conversation that looped until the error limit did not solve its task.
+
 ---
 
 ## 4. Engineering findings
@@ -827,7 +887,16 @@ changed the design:
   environment punishes.
 - **Thinking had to be disabled for a fair baseline** — with it on, the 0.6B spends its
   whole budget reasoning and never calls a tool, which would have handicapped the *base*
-  checkpoint specifically and inflated SFT's apparent gain.
+  checkpoint specifically and inflated SFT's apparent gain. The same trap reappeared on the other
+  side of the conversation: τ-bench's Qwen3.6 customer spent its entire token budget reasoning and
+  returned **empty content**, which would have blanked every customer turn and scored as the agent
+  failing to make progress.
+- **A zero reward and an unscored run are not the same thing.** τ-bench leaves `reward_basis` and
+  `db_check` null when a conversation ends on `max_steps` or an error, while `reward` still defaults
+  to `0.0`. Averaging naively fabricates a clean `pass^1 = 0.000` out of runs no evaluator ever saw.
+- **Secrets must not travel on argv.** `CalledProcessError` prints the entire command line into the
+  logs, so a Modal proxy token passed through `--user-llm-args` was leaked by a *failure* rather
+  than by the code path that used it. It now travels in the environment.
 - **A Modal spend limit is reported as "waiting for capacity",** and it is not the credit
   balance: $1.40 of ~$30 had been spent when everything stopped. Transient scarcity, a dead
   budget and a settings cap all look identical in the logs.

@@ -8,6 +8,8 @@ an environment with verifiable rewards, and evaluates all three checkpoints iden
 - **[WRITEUP.md](WRITEUP.md)** — results, reward design, trade-offs, and what failed.
 - **[BFCL_PREREGISTRATION.md](BFCL_PREREGISTRATION.md)** — external-benchmark predictions,
   committed before the run, with the outcome appended.
+- **[TAU2_PREREGISTRATION.md](TAU2_PREREGISTRATION.md)** — the same discipline for τ-bench retail,
+  including two predictions that were refuted and one pilot result that fresh data destroyed.
 - **[ENGINEERING_NOTES.md](ENGINEERING_NOTES.md)** — the things that cost time.
 
 ## Results
@@ -143,6 +145,32 @@ episodes make zero calls — yet it recovers only **25%** of the external gap to
 teaches ("no email, no order id, no call") is narrower than what BFCL grades. Same lesson as §3.6
 from the other side: the environment keeps being too narrow to support the claim, and only the
 external benchmark shows it. [WRITEUP.md](WRITEUP.md) §3.10.
+
+### τ-bench retail inverts the ranking
+
+The last check is the benchmark `tau-retail-lite` was simplified *from* — seven tool names match
+verbatim — so it tests whether the simplification was faithful rather than whether capability
+generalised. Crucially it has the **user simulator** whose absence §3.1 blamed for SFT's collapse.
+40 tasks, four arms, a Qwen3.6-27B customer held fixed; predictions in
+**[TAU2_PREREGISTRATION.md](TAU2_PREREGISTRATION.md)**:
+
+| | Base | + SFT | SFT+RL (30) | **SFT 1500 + RL** |
+|---|---|---|---|---|
+| solved / usable | **0.091** | **0.091** | 0.026 | **0.025** |
+| loops to death | 0.424 | 0.394 | 0.718 | **0.850** |
+| asks the customer | 0.213 | **0.422** | 0.348 | 0.297 |
+| in-domain `pass^1` | 0.132 | 0.035 | 0.797 | **0.880** |
+
+**The best in-domain agent is the worst here.** More RL monotonically lowers how often the model
+asks the customer anything and raises how often it loops on invented arguments until the error limit
+fires — the in-domain ranking, reversed. Thirty GRPO steps on the SFT checkpoint nearly double its
+loop rate (p=0.008). And **§3.1 is vindicated**: SFT's 0.097 in-domain deficit against base vanishes
+to exactly zero once the user simulator it was trained to talk to exists.
+
+Two near-misses are documented rather than buried. A 10-task pilot showed SFT curing the looping
+(2/10 vs 7/10); on 40 fresh tasks that is p=1.00000 and false. And τ-bench only scores conversations
+that end normally, so averaging over *scored* runs conditions on surviving — which inflates the
+worst arm from 1/40 to 1/6 and makes it look tied for best. [WRITEUP.md](WRITEUP.md) §3.12.
 
 ## The loop
 
