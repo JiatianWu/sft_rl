@@ -161,12 +161,19 @@ cap and is the right fix either way, but diagnosing it as an exhausted balance w
 looking for a new account instead of a settings change. Check `modal billing summary` before
 believing any story about why a job will not schedule.
 
-**The whole project metered $4.75 and was billed $0.00**, credits covering all of it — about
-16% of the ~$30. A10 GPU time was $4.32 of that (91%), CPU $0.33, memory $0.08, volumes $0.02.
-The four stages that produced the headline SFT→GRPO result cost well under a dollar together;
-most of the total went on the four ablation arms added afterwards, the two 200-step runs being
-roughly 4× a 30-step run. Re-running the full six-arm evaluation costs about $1, which is the
-relevant number when deciding whether a metric change is worth re-baselining for.
+**The whole project metered $32.10 against $30 of credits, and was billed $1.94.** The four
+stages that produced the headline SFT→GRPO result cost **well under a dollar** together; at the
+point the loop first closed the running total was $4.75, all of it covered. Everything above that
+went on finding out what the number meant. Re-running the full six-arm evaluation costs about $1,
+which is the relevant figure when deciding whether a metric change is worth re-baselining for, and
+the two 200-step arms are each roughly 4× a 30-step run.
+
+**The single most expensive line is a user simulator, at $12.32 — 38% of the project.** τ-bench
+needs a competent customer, that customer is a 27B model on its own always-on endpoint, and it bills
+for the whole conversation whether or not the agent under test is capable of finishing one. Worth
+knowing before choosing a benchmark with a simulated human in it: **the counterpart, not the model
+being evaluated, sets the price.** Stop the endpoint the moment a sweep finishes — scale-to-zero
+covers idle time, but a live endpoint is easy to forget and this one outweighed all training.
 
 **Checkpoint per stage, not per pipeline.** The eviction cost the entire SFT run, because
 the adapter is only written at the end. Worse, splitting the pipeline across four Modal

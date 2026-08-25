@@ -1035,7 +1035,54 @@ reading the logs: the first stays green, the second lies, and the third never pr
 
 ---
 
-## 6. What a week would buy
+## 6. Iteration log
+
+The loop closed inside the time budget and could have been submitted there. Everything after it
+bought understanding rather than score, and the ledger says so plainly: **the four stages that
+produced the headline result cost well under a dollar; the other ~$31 went to finding out what that
+number meant.** Nine rounds, each with what it bought and what it cost.
+
+| # | what changed | what it bought | in-domain |
+|---|---|---|---|
+| 0 | close SFT → GRPO → eval | the deliverable, inside the 4h cap | **0.794** |
+| 1 | add RL-only arms at matched compute | separates *SFT as policy* from *SFT as prior* (+0.301); exposes the 0.929 hack | 0.794 |
+| 2 | fix 28 unwinnable tasks + the circular test guarding them; re-baseline twice | numbers become trustworthy, and gain real error bars (±0.01 / ±0.05) | 0.797 |
+| 3 | **BFCL, pre-registered** | the central finding: nothing transfers, and SFT destroyed parallel calling (0.725 → **0.000**) | 0.797 |
+| 4 | diagnose the collapse with counts; mix in Hermes parallel data | 82% of the damage recovered — the cause was a missing demonstration, not lost capacity | — |
+| 5 | GRPO from the mixed prior | the repair does not pay for itself; SFT's value was never "SFT" but *domain-matched* data | 0.475 |
+| 6 | add an abstention family, held out by topic | restraint is separately trainable (z = 4.06), and mostly does not transfer | 0.436 |
+| 7 | lift the corpus cap | **best genuine agent**; the trade in round 5 was an artifact of the control, not a constraint | **0.880** |
+| 8 | **τ-bench retail, pre-registered** | 0/35 on write tasks; the behavioural result (RL raises looping, kills escalation) | 0.880 |
+
+**Score moved 0.797 → 0.880. Confidence in the score moved much further, and downward.** At round 0
+the 0.794 was reported as a clean result. By round 8 it was known to be sitting on 28 unsolvable
+tasks, a circular test, a reward hack one arm above it, a destroyed parallel-calling capability, and
+an agent that solves none of τ-bench's 35 write tasks. **None of those five is visible to any
+in-domain metric**, which is the argument for spending the other $31.
+
+Three rounds paid for themselves several times over. **Round 3** changed the thesis from "RL
+improved the model 6.7×" to "the improvement does not leave the environment it was trained in" —
+without it this document reports a number rather than a finding. **Round 2** is what makes every
+other row quotable, since error bars are the difference between a result and a coincidence. And
+**round 7** is the only one that questioned the *experiment* rather than the model: the corpus cap
+existed to make composition the sole variable, which is correct design, but a control is not a
+budget, and treating it as one had manufactured a false dilemma in round 5.
+
+Two rounds are worth recording as cheap and high-yield. Every measured round was **pre-registered**
+(rounds 3 and 8 in [`BFCL_PREREGISTRATION.md`](BFCL_PREREGISTRATION.md) and
+[`TAU2_PREREGISTRATION.md`](TAU2_PREREGISTRATION.md)), which is why P17, P21 and P23 could be
+*refuted* rather than quietly reshaped — and in two of those three the refutation produced a better
+claim than the hypothesis. And round 8's paid run was preceded by a **zero-cost dry run** that
+pointed the user simulator at the local server: it cost nothing and caught two harness bugs, one of
+which (τ-bench reporting `reward = 0.0` for conversations it never scored) would have silently
+falsified every number in §3.12.
+
+**Cost.** $32.10 metered against $30 of credits, $1.94 billed. The τ-bench user simulator endpoint
+is $12.32 of that — 38% of the project, for the single round that most undermined its headline.
+
+---
+
+## 7. What a week would buy
 
 Ordered by expected value, not by effort.
 

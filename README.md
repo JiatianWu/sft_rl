@@ -12,6 +12,13 @@ an environment with verifiable rewards, and evaluates all three checkpoints iden
   including two predictions that were refuted and one pilot result that fresh data destroyed.
 - **[ENGINEERING_NOTES.md](ENGINEERING_NOTES.md)** — the things that cost time.
 
+The loop closed inside the 4-hour cap and could have been submitted there; [WRITEUP.md](WRITEUP.md)
+§6 logs the nine rounds that followed and what each bought. The short version: **score moved 0.797 →
+0.880, confidence in the score moved much further and downward.** The four stages behind the
+headline cost well under a dollar — the other ~$31 went to learning that the result sits on a
+destroyed capability (§3.6), a reward hack one arm above it (§3.3), a circular test (§3.4) and an
+agent that solves none of τ-bench's 35 write tasks (§3.12). None of the five is visible in-domain.
+
 ## Results
 
 Task success on 2,400 held-out episodes per checkpoint, identical decoding throughout.
