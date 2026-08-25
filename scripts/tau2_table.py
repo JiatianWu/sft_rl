@@ -59,6 +59,25 @@ def load(tag: str) -> dict | None:
     scored = [s for s in simulations if (s.get("reward_info") or {}).get("reward_basis") is not None]
     rewards = [(s["reward_info"]).get("reward", 0.0) for s in scored]
 
+    # P22/P23 denominators exclude infrastructure errors, declared in the pre-registration before
+    # the split was known, because the pilot's infra rate was uneven across arms (1, 3, 0).
+    usable = [s for s in simulations if s.get("termination_reason") != "infrastructure_error"]
+
+    # P23 measures the claimed mechanism directly. "SFT loops less" is the symptom; the claim is
+    # that it *asks the customer* for what it is missing instead of inventing it, so asking is
+    # counted rather than inferred from how the conversation died.
+    asked_turns = agent_turns = conversations_with_a_question = 0
+    for simulation in usable:
+        asked_here = False
+        for message in simulation.get("messages") or []:
+            if message.get("role") != "assistant":
+                continue
+            agent_turns += 1
+            if not message.get("tool_calls") and "?" in (message.get("content") or ""):
+                asked_turns += 1
+                asked_here = True
+        conversations_with_a_question += int(asked_here)
+
     components: dict[str, list[float]] = collections.defaultdict(list)
     for simulation in scored:
         for key, value in ((simulation["reward_info"]).get("reward_breakdown") or {}).items():
@@ -73,6 +92,10 @@ def load(tag: str) -> dict | None:
         "normal_stop": terminations.get("user_stop", 0) + terminations.get("agent_stop", 0),
         "terminations": dict(terminations),
         "components": {k: sum(v) / len(v) for k, v in components.items() if v},
+        "usable": len(usable),
+        "looped": sum(1 for s in usable if s.get("termination_reason") == "too_many_errors"),
+        "asked_any": conversations_with_a_question,
+        "ask_rate": (asked_turns / agent_turns) if agent_turns else 0.0,
     }
 
 
@@ -95,6 +118,16 @@ def main() -> None:
             score = f"{data['pass1']:.3f} [{low:.2f},{high:.2f}]"
         stop = f"{data['normal_stop']}/{data['n']}"
         print(f"{label:<22} {data['n']:>5} {data['scored']:>7} {score:>16} {data['solved']:>7} {stop:>12}")
+
+    print("\nP22 loop-to-death rate and P23 asking rate (infrastructure errors excluded)")
+    header = f"{'arm':<22} {'usable':>7} {'looped':>16} {'asked at all':>16} {'ask rate':>10}"
+    print(header)
+    print("-" * len(header))
+    for _, label, data in rows:
+        n = data["usable"]
+        loop = f"{data['looped']}/{n} ({data['looped'] / n:.2f})" if n else "n/a"
+        asked = f"{data['asked_any']}/{n} ({data['asked_any'] / n:.2f})" if n else "n/a"
+        print(f"{label:<22} {n:>7} {loop:>16} {asked:>16} {data['ask_rate']:>10.3f}")
 
     print("\nreward components (scored simulations only)")
     for _, label, data in rows:

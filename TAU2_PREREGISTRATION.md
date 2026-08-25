@@ -138,6 +138,67 @@ contact with a competent user simulator, it is §3.9's finding showing up extern
 that rewards acting and punishes deferring produces an agent that retries instead of asking. Stated
 as a hypothesis, from one conversation with a broken counterpart — not as a result.
 
+## Follow-up 5: P22, and why it is a new prediction rather than a rescue of P18
+
+**The pilot's headline confirmed P19 and killed P18's testability.** Ten retail tasks against
+`base`, `sft` and `grpo_1500` produced `pass^1 = 0.000` in every scored simulation of every arm,
+with `DB = 0.000` throughout. Nobody solved anything. The pre-committed rule — "if the pilot returns
+zero for all three arms, the full run is not purchased" — fires. P18 asked whether `sft` closes its
+in-domain deficit against `base`; the deficit did close, from −0.097 to exactly 0.000, but only
+because both ends collapsed to the floor. That is a degenerate confirmation and is recorded as
+**not testable at this resolution**, not as a pass.
+
+**What did discriminate was the failure mode, and it is not the metric this file pre-registered.**
+
+| arm | loops to death (`too_many_errors`) | conversation ends normally |
+|---|---|---|
+| `base` | 7/10 | 2/10 |
+| `sft` | **2/10** | **5/10** |
+| `grpo_1500` | **10/10** | **0/10** |
+
+Fisher exact, two-sided: `sft` vs `grpo_1500` on loop rate is 2/10 against 10/10, *p* = 0.0007.
+
+Normal-stop rate was pre-registered above as a **health check on the customer**, not as an arm
+metric. Promoting it to a headline result now, because it happens to point the way §3.1 predicts,
+is precisely the post-hoc move this file exists to prevent. So the pilot finding is logged as
+**exploratory**, and the claim gets a fresh prediction tested on data it has never seen.
+
+**Design.** Tasks `10`–`49`, disjoint from the pilot's `0`–`9`. Four arms: `base`, `sft`, `grpo`
+(SFT+RL 30) and `grpo_1500`. Simulations ending in `infrastructure_error` are excluded from all
+denominators — declared here because the pilot's infra rate was uneven across arms (1, 3, 0) and
+choosing that rule after seeing the split would be another way to cook the result.
+
+**P22 — `sft` loops to death materially less often than `grpo_1500`, on fresh tasks.** The pilot
+gap is 2/10 against 10/10; I expect it to narrow on 40 tasks but survive, with `sft` below 0.45 and
+`grpo_1500` above 0.75.
+
+*Refuted if* the rates come within 0.15 of each other, which would mean the pilot split was small-
+sample noise and the exploratory finding should be dropped rather than written up.
+
+**P23 — the mechanism is asking, and it will be visible directly.** The claim is not "SFT loops
+less" but "SFT asks the customer for missing information instead of inventing it". So the rate of
+agent turns that put a question to the customer, rather than calling a tool, is measured directly:
+I predict `sft` asks at more than twice `grpo_1500`'s rate, and that asking rate tracks loop rate
+across all four arms.
+
+*Refuted if* loop rates differ while asking rates do not. That would mean the loops are generic
+small-model repetition and the tidy §3.9 story — an environment that rewards acting and punishes
+deferring produces an agent that retries instead of asking — is wrong, however well it reads.
+
+**P24 — `grpo` sits between `sft` and `grpo_1500`, nearer the latter.** If RL against a
+user-less environment is what erodes the asking behaviour, then applying it to the SFT checkpoint
+should move that checkpoint toward the failure. This is the prediction that actually separates
+"RL broke it" from "SFT fixed something base never had".
+
+*Refuted if* `grpo` matches `sft`, which would mean 30 steps of RL leave the disposition intact and
+`grpo_1500`'s collapse comes from its corpus rather than from RL.
+
+**The alternative hypothesis, stated before the data.** `base` loops at 7/10 — high, untrained.
+That is consistent with looping being the *default* behaviour of a 0.6B, with SFT fixing it and RL
+undoing the fix. It is equally consistent with looping being generic repetition that correlates
+with nothing. P23 is what tells these apart, and it is the reason the mechanism is measured
+directly rather than inferred from termination reasons.
+
 ## What would make this uninformative
 
 **All arms scoring 0/114.** P19 already predicts very low scores, and there is a real chance they

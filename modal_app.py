@@ -769,7 +769,12 @@ def bfcl_sweep(jobs: str = "", threads: int = 64) -> None:
 
 
 @app.local_entrypoint()
-def tau2_sweep(tags: str = "base,sft,grpo_1500", num_tasks: int = 10, num_trials: int = 1) -> None:
+def tau2_sweep(
+    tags: str = "base,sft,grpo_1500",
+    num_tasks: int = 10,
+    num_trials: int = 1,
+    task_ids: str = "",
+) -> None:
     """Run several arms against τ-bench in parallel, one container each.
 
     Every arm shares the one customer endpoint, which is the point: the user simulator has to be
@@ -780,7 +785,12 @@ def tau2_sweep(tags: str = "base,sft,grpo_1500", num_tasks: int = 10, num_trials
 
     specs = [tag.strip() for tag in tags.split(",") if tag.strip()]
     print(f"[sweep] {len(specs)} arms in parallel: {specs}", flush=True)
-    for result in tau2.starmap([(tag, num_tasks, num_trials) for tag in specs]):
+    jobs = [
+        (tag, num_tasks, num_trials, "openai/Qwen/Qwen3.6-27B-FP8", 4, 100,
+         "https://jiatianwuwork--ep-tau2-user-server.us-west.modal.direct/v1", task_ids)
+        for tag in specs
+    ]
+    for result in tau2.starmap(jobs):
         print(f"[sweep] {json.dumps(result)}", flush=True)
 
 
@@ -1055,6 +1065,7 @@ def tau2(
     concurrency: int = 4,
     max_steps: int = 100,
     user_api_base: str = "https://jiatianwuwork--ep-tau2-user-server.us-west.modal.direct/v1",
+    task_ids: str = "",
 ) -> dict:
     """Run τ-bench retail against one merged checkpoint.
 
@@ -1124,7 +1135,10 @@ def tau2(
                     }
                 ),
             ]
-        if num_tasks:
+        if task_ids:
+            # Explicit ids rather than a count, so P22 runs on tasks the pilot never touched.
+            command += ["--task-ids", *task_ids.split(",")]
+        elif num_tasks:
             command += ["--num-tasks", str(num_tasks)]
         print(f"\n{'=' * 70}\n[tau2] {tag}: {num_tasks or 'all'} tasks x {num_trials}\n{'=' * 70}", flush=True)
         subprocess.run(command, cwd="/opt/tau2", check=True)
