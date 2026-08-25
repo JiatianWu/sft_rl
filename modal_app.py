@@ -768,6 +768,22 @@ def bfcl_sweep(jobs: str = "", threads: int = 64) -> None:
         print(f"[sweep] {result['tag']}: {json.dumps(result['scores'])}", flush=True)
 
 
+@app.local_entrypoint()
+def tau2_sweep(tags: str = "base,sft,grpo_1500", num_tasks: int = 10, num_trials: int = 1) -> None:
+    """Run several arms against τ-bench in parallel, one container each.
+
+    Every arm shares the one customer endpoint, which is the point: the user simulator has to be
+    identical across arms for the comparison to mean anything, and a single endpoint autoscales
+    to serve them all.
+    """
+    import json
+
+    specs = [tag.strip() for tag in tags.split(",") if tag.strip()]
+    print(f"[sweep] {len(specs)} arms in parallel: {specs}", flush=True)
+    for result in tau2.starmap([(tag, num_tasks, num_trials) for tag in specs]):
+        print(f"[sweep] {json.dumps(result)}", flush=True)
+
+
 def _optional_secret(name: str) -> list:
     """Attach a secret only when it exists.
 
@@ -782,6 +798,48 @@ def _optional_secret(name: str) -> list:
         return [secret]
     except Exception:
         return []
+
+
+def _warm_user_endpoint(user_api_base: str, model: str, minutes: int = 12) -> None:
+    """Block until the customer endpoint answers a real request.
+
+    A Modal Endpoint scales to zero, and a 27B takes about two and a half minutes to wake. τ-bench
+    gives a failing call four attempts and then records the simulation as an infrastructure error
+    with zero messages, so firing several arms at a cold endpoint destroys every simulation in the
+    sweep before a single conversation starts. That is exactly how the first pilot died: 30 of 30
+    simulations lost to 503s.
+    """
+    import json
+    import time
+    import urllib.error
+    import urllib.request
+
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 4,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+    deadline = time.time() + minutes * 60
+    attempt = 0
+    while time.time() < deadline:
+        attempt += 1
+        try:
+            request = urllib.request.Request(
+                f"{user_api_base}/chat/completions",
+                data=json.dumps(payload).encode(),
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {os.environ.get('TAU2_USER_API_KEY', '')}",
+                },
+            )
+            urllib.request.urlopen(request, timeout=120).read()
+            print(f"[tau2] customer endpoint warm after {attempt} attempt(s)", flush=True)
+            return
+        except Exception as error:  # noqa: BLE001
+            print(f"[tau2] warming customer, attempt {attempt}: {type(error).__name__}", flush=True)
+            time.sleep(20)
+    raise RuntimeError(f"customer endpoint still cold after {minutes} minutes")
 
 
 def _serve_vllm(tag: str, port: int = 8000):
@@ -880,6 +938,99 @@ def tau2_probe(tag: str = "grpo_1500") -> None:
         server.terminate()
 
 
+@app.function(
+    image=tau2_image,
+    timeout=1 * HOURS,
+    secrets=_optional_secret("tau2-user-token"),
+)
+def tau2_user_probe(
+    user_api_base: str = "https://jiatianwuwork--ep-tau2-user-server.us-west.modal.direct/v1",
+    model: str = "Qwen/Qwen3.6-27B-FP8",
+) -> None:
+    """Check the customer endpoint answers, and answers *in character*, before paying for a run.
+
+    A user simulator that cannot stay in role is the one failure this benchmark cannot survive:
+    TAU2_PREREGISTRATION.md records that a weak customer penalises asking far more than acting,
+    which is the exact axis P18 measures. The 0.6B dry run failed here by replying "I'm here to
+    assist you with your request" — playing agent instead of customer — so the probe checks the
+    reply looks like a customer rather than merely checking for a 200.
+    """
+    import json
+    import os
+    import urllib.request
+
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a customer contacting retail support. You want to cancel order "
+                    "#W123. Your email is amy@example.com. Stay in character as the customer. "
+                    "Reveal details only when asked."
+                ),
+            },
+            {"role": "assistant", "content": "Hi! How can I help you today?"},
+        ],
+        "temperature": 0.0,
+        "max_tokens": 120,
+        # Qwen3.6 thinks by default and spent the entire 120-token budget on reasoning, returning
+        # empty content with finish_reason=length. Every customer turn would have been blank, which
+        # τ-bench would have scored as the agent failing to make progress.
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+    import time
+
+    def call() -> dict:
+        request = urllib.request.Request(
+            f"{user_api_base}/chat/completions",
+            data=json.dumps(payload).encode(),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {os.environ.get('TAU2_USER_API_KEY', '')}",
+            },
+        )
+        return json.loads(urllib.request.urlopen(request, timeout=300).read())
+
+    # A scaled-to-zero 27B answers 503 until it finishes loading. Retry rather than report a cold
+    # start as a broken endpoint; re-raise the body, since urllib's HTTPError does not survive
+    # Modal's exception pickling and would otherwise surface as an unrelated SerializationError.
+    reply, last = None, ""
+    for attempt in range(20):
+        try:
+            reply = call()
+            break
+        except urllib.error.HTTPError as error:
+            last = f"HTTP {error.code}: {error.read()[:300]!r}"
+            print(f"[user-probe] attempt {attempt + 1}: {last}", flush=True)
+            time.sleep(30)
+        except Exception as error:  # noqa: BLE001
+            last = f"{type(error).__name__}: {error}"
+            print(f"[user-probe] attempt {attempt + 1}: {last}", flush=True)
+            time.sleep(30)
+    if reply is None:
+        raise RuntimeError(f"customer endpoint never became ready: {last}")
+
+    choice = reply["choices"][0]
+    content = choice["message"].get("content") or ""
+    print(f"[user-probe] finish_reason: {choice.get('finish_reason')}", flush=True)
+    print(f"[user-probe] message keys: {list(choice['message'].keys())}", flush=True)
+    print(f"[user-probe] reasoning: {str(choice['message'].get('reasoning_content'))[:200]!r}", flush=True)
+    print(f"[user-probe] customer says: {content!r}", flush=True)
+    print(f"[user-probe] usage: {reply.get('usage')}", flush=True)
+
+    # Checked first, and deliberately: an empty reply passes a naive in-character test, because a
+    # string containing nothing contains no agent-speak either. A customer that says nothing stalls
+    # every conversation and would be scored as agent failure.
+    if not content.strip():
+        raise RuntimeError("customer returned empty content — conversations would stall")
+
+    agentish = ("how can i help", "how may i assist", "i'm here to assist", "happy to help")
+    if any(phrase in content.lower() for phrase in agentish):
+        raise RuntimeError("customer is answering like an agent — the P18 comparison would be void")
+    print("[user-probe] OK — stayed in character", flush=True)
+
+
 @app.function(image=tau2_image, timeout=1 * HOURS)
 def tau2_check() -> None:
     """Verify the τ-bench data set and CLI surface without starting a GPU."""
@@ -900,10 +1051,10 @@ def tau2(
     tag: str = "grpo_1500",
     num_tasks: int = 10,
     num_trials: int = 1,
-    user_llm: str = "openai/gpt-4.1-mini",
+    user_llm: str = "openai/Qwen/Qwen3.6-27B-FP8",
     concurrency: int = 4,
     max_steps: int = 100,
-    user_api_base: str = "",
+    user_api_base: str = "https://jiatianwuwork--ep-tau2-user-server.us-west.modal.direct/v1",
 ) -> dict:
     """Run τ-bench retail against one merged checkpoint.
 
@@ -937,6 +1088,9 @@ def tau2(
     import subprocess
     from pathlib import Path
 
+    if user_api_base:
+        _warm_user_endpoint(user_api_base, user_llm.split("/", 1)[1])
+
     server = _serve_vllm(tag)
     run_name = f"{tag}_retail"
     try:
@@ -959,6 +1113,14 @@ def tau2(
                     {
                         "api_base": user_api_base,
                         "api_key": os.environ.get("TAU2_USER_API_KEY", "dummy"),
+                        # Without this the customer spends its whole token budget on reasoning and
+                        # returns empty content, stalling every conversation. Verified by
+                        # `tau2_user_probe`, which now rejects an empty reply outright.
+                        "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
+                        # Survive a mid-run scale-down; the default gives up after four tries,
+                        # which is not enough for a cold 27B.
+                        "num_retries": 8,
+                        "timeout": 300,
                     }
                 ),
             ]
