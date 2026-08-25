@@ -51,10 +51,22 @@ it can measure the behaviour my own environment made unscoreable.
   domain with any relationship to what was trained.
 - **Staged.** A 10-task pilot on `base`, `sft`, and `grpo_1500` first. The full 114 × 4 trials is
   bought only if the pilot returns a non-zero signal.
-- **User simulator:** `gpt-4.1-mini`, held fixed across arms. This is a deliberate cost compromise
-  and it **breaks comparability with published leaderboard numbers**, which use frontier-class user
-  models. Arm-versus-arm comparisons remain valid; any comparison to a published τ-bench score does
-  not, and the writeup will say so wherever a number appears.
+- **User simulator:** `Qwen/Qwen3.6-27B-FP8`, served on a Modal Endpoint and held fixed across
+  arms. An open-weight customer **breaks comparability with published leaderboard numbers** more
+  thoroughly than a smaller commercial model would. Arm-versus-arm comparisons remain valid; any
+  comparison to a published τ-bench score does not, and the writeup will say so wherever a number
+  appears.
+
+  **This choice is a confound in one specific direction, and it is why a small model was not
+  used.** A customer that cannot hold up its half of the conversation fails to volunteer the
+  information the agent needs. That penalises every arm, but it penalises *asking* far more than
+  *acting* — and asking is precisely the behaviour SFT learned and that P18 predicts will finally
+  be rewarded here. A weak user simulator could therefore manufacture a false refutation of P18:
+  not "§3.1's diagnosis was wrong" but "the customer was incapable of answering". The zero-cost
+  plumbing run demonstrated the extreme case, where a 0.6B customer answered "I'm here to assist
+  you with your request" and played agent instead. **The rate of normal conversation termination
+  will be reported alongside every result as a health check on the customer**; if it is low, the
+  comparison is not trustworthy in either direction.
 - **Isolation:** a fourth Modal image. `tau2-bench` installs into its own uv-managed venv, so unlike
   the BFCL integration its dependencies never meet vLLM's.
 

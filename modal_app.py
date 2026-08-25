@@ -894,7 +894,7 @@ def tau2_check() -> None:
     image=tau2_image,
     volumes=VOLUMES,
     timeout=4 * HOURS,
-    secrets=_optional_secret("openai-key"),
+    secrets=_optional_secret("openai-key") + _optional_secret("tau2-user-token"),
 )
 def tau2(
     tag: str = "grpo_1500",
@@ -903,6 +903,7 @@ def tau2(
     user_llm: str = "openai/gpt-4.1-mini",
     concurrency: int = 4,
     max_steps: int = 100,
+    user_api_base: str = "",
 ) -> dict:
     """Run τ-bench retail against one merged checkpoint.
 
@@ -924,6 +925,12 @@ def tau2(
     useless as a measurement, since a 0.6B customer cannot hold up its half of the conversation.
     (`--user dummy_user` cannot serve this purpose: it exists only for solo mode, which asserts on
     tasks carrying a `ticket` field, and no retail task has one.)
+
+    `user_api_base` routes the customer to a separate OpenAI-compatible server — a Modal Endpoint,
+    say — while the agent stays on localhost. It has to be passed per-call rather than through the
+    environment because LiteLLM resolves `hosted_vllm/` against a single global
+    `HOSTED_VLLM_API_BASE`; without the override both roles land on the same server and the
+    benchmark quietly swaps its customer for our own checkpoint.
     """
     import json
     import shutil
@@ -943,6 +950,18 @@ def tau2(
             "--max-steps", str(max_steps),
             "--save-to", run_name,
         ]
+        if user_api_base:
+            # A Modal Endpoint proxy token is `wk-<id>.ws-<secret>`, which Modal documents as
+            # usable verbatim as an OpenAI-compatible bearer key.
+            command += [
+                "--user-llm-args",
+                json.dumps(
+                    {
+                        "api_base": user_api_base,
+                        "api_key": os.environ.get("TAU2_USER_API_KEY", "dummy"),
+                    }
+                ),
+            ]
         if num_tasks:
             command += ["--num-tasks", str(num_tasks)]
         print(f"\n{'=' * 70}\n[tau2] {tag}: {num_tasks or 'all'} tasks x {num_trials}\n{'=' * 70}", flush=True)
