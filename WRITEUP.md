@@ -1,6 +1,6 @@
 # Multi-turn tool use on a 0.6B model: SFT → GRPO → eval
 
-**Model** `Qwen3-0.6B` · **Compute** Modal, single A10 · **Cost** $32.10 metered, $1.94 billed
+**Model** `Qwen3-0.6B` · **Compute** Modal, single A10 
 
 The loop closed inside the 4-hour cap; the rounds after it are logged in [FINDINGS.md](FINDINGS.md)
 §6, which also holds every number, transcript and refuted prediction behind what follows. This is the
@@ -12,10 +12,12 @@ Six checkpoints, identical decoding (T=0.7, top-p 0.95, fixed seed), **2,400 hel
 each** (600 tasks × 4 trials). Test seeds are disjoint from training seeds. Error bars are
 *measured*, by evaluating every checkpoint twice: **±0.01 headline, ±0.05 per family.**
 
-| | Base | + SFT | RL only (30) | SFT+RL (30) | RL only (200) | **`grpo_1500`** |
-|---|---|---|---|---|---|---|
-| **pass^1** | 0.132 | 0.035 | 0.496 | 0.797 | *0.929* | **0.880** |
-| looked up before writing | 0.14 | 0.42 | 0.94 | 1.00 | **0.02** | **1.00** |
+
+|                          | Base  | + SFT | RL only (30) | SFT+RL (30) | RL only (200) | `grpo_1500` |
+| ------------------------ | ----- | ----- | ------------ | ----------- | ------------- | ----------- |
+| **pass^1**               | 0.132 | 0.035 | 0.496        | 0.797       | *0.929*       | **0.880**   |
+| looked up before writing | 0.14  | 0.42  | 0.94         | 1.00        | **0.02**      | **1.00**    |
+
 
 The loop works: 0.132 → 0.880 in its own environment, a 6.7× gain, with `grpo_1500` the best arm
 that is not exploiting the reward. **Every other section of this document is about why that sentence
@@ -38,9 +40,9 @@ makes the check independent of *how* the agent got there.
 terms densify it, each shaped so it cannot be farmed on its own:
 
 - **Progress** (+0.3) — fraction of oracle actions performed with matching key arguments, *consumed
-  greedily*, so repeating one correct call cannot substitute for a missing one.
+greedily*, so repeating one correct call cannot substitute for a missing one.
 - **Efficiency** (−0.05/redundant call, capped −0.15) — **charged only when the episode already
-  succeeded**, so it can never outrank correctness.
+succeeded**, so it can never outrank correctness.
 - **Violations** (−0.2 per illegal write or failed call, capped −0.5) — always charged.
 
 **Abstention is folded into the state term, not the shaping.** For a task whose correct answer is to
@@ -80,10 +82,12 @@ under test proves nothing.** Both fixed and pinned; all six arms re-baselined.
 **(d) None of it transfers.** Two external benchmarks, predictions committed beforehand
 ([BFCL](BFCL_PREREGISTRATION.md), [τ-bench](TAU2_PREREGISTRATION.md)).
 
-| BFCL (2,340 cases) | Base | + SFT | SFT+RL (30) | RL only (200) |
-|---|---|---|---|---|
-| AST pooled | **0.807** | 0.371 | 0.493 | 0.795 |
-| `parallel` | 0.725 | **0.000** | **0.000** | 0.715 |
+
+| BFCL (2,340 cases) | Base      | + SFT     | SFT+RL (30) | RL only (200) |
+| ------------------ | --------- | --------- | ----------- | ------------- |
+| AST pooled         | **0.807** | 0.371     | 0.493       | 0.795         |
+| `parallel`         | 0.725     | **0.000** | **0.000**   | 0.715         |
+
 
 **No trained arm beats base on anything, and parallel calling falls to exactly 0 of 200.** Syntax
 stays valid; the model emits one call where two are required, because both the SFT corpus and the
@@ -135,39 +139,46 @@ arms across containers cut a sweep to 24 minutes at identical GPU-seconds, where
 
 ## 7. Limitations
 
-- **The environment leaks its own answers.** The `easy` instruction states the order and item ids, so
-  the intended lookup is never *required* — only the policy text asks for it. The most serious flaw
-  here, and what makes finding (b) possible.
 - **One model, one environment, one seed per training run,** and the reward's shaping terms were
-  never ablated. No claim here is known to survive a change to any of them.
-- **τ-bench's `pass^1` is not a capability measurement** at 3 solves against 1, on tasks that reward
-  inaction, with a user simulator that invented order ids in ~7.5% of conversations.
+never ablated. No claim here is known to survive a change to any of them.
+- **τ-bench's** `pass^1` **is not a capability measurement** at 3 solves against 1, on tasks that reward
+inaction, with a user simulator that invented order ids in ~7.5% of conversations.
+
+
 
 ## 8. What a week would buy
 
-1. **Fix the leak, then re-run everything.** Withhold ids from the instruction so lookup is
-   *required*. It is the single change that would let 0.880 be described as tool use.
-2. **Ablate the reward.** Every shaping term in §2 is a claim. Drop each in turn and watch both
-   success and whether the term induces hacking — §4(b) shows construction and unit tests do not
+1. **Ablate the reward.** Every shaping term in §2 is a claim. Drop each in turn and watch both
+  success and whether the term induces hacking — §4(b) shows construction and unit tests do not
    catch an exploit that only a long run surfaces.
-3. **Train on the axis, not around it.** §5 shows act/abstain is separable, but the fix saturates
-   in-domain while closing a quarter of the external gap; the abstention family needs BFCL-level
+2. **Train on the axis, not around it.** §5 shows act/abstain is separable, but the fix saturates
+  in-domain while closing a quarter of the external gap; the abstention family needs BFCL-level
    diversity, not one hand-written topic list.
-4. **Instrument for hacking by default, and audit fixtures for circularity.** The compliance metric
-   that exposed §4(b) was written *after* the run that needed it — rising success with a falling call
+3. **Instrument for hacking by default, and audit fixtures for circularity.** The compliance metric
+  that exposed §4(b) was written *after* the run that needed it — rising success with a falling call
    count should be an alarm, not progress.
+
+
 
 ## 9. How the work was directed
 
 Written with an AI coding agent, which makes the interesting question what was *decided* rather than
 what was typed. The round-by-round ledger is [FINDINGS.md](FINDINGS.md) §6; the loop closed in round
-0, inside the cap, and every round after it was a choice about where to spend a $30 budget. Three of
+0, inside the cap, and every round after it was a choice about where to spend a $30 budget. Four of
 those choices did most of the work.
 
 **Buy external validation before polishing internal numbers.** BFCL sat in the plan unexecuted while
 the in-domain table kept improving. Running it (round 3) is what converted "RL improved the model
 6.7×" into "the improvement does not leave the environment it was trained in" — it cost this project
 its headline and is the reason the document has a finding rather than a score.
+
+**Ask what the model has never seen.** Every arm to that point had been trained and evaluated on one
+self-written environment, and the question of whether *anything* in the pipeline had shown the model
+a second domain is what opened rounds 4 through 7. Diversifying the SFT corpus repaired the parallel
+collapse (§4d), then failed to pay for itself as an RL prior, and finally — once the corpus cap that
+made those two goals look exclusive was recognised as an artifact of the experiment rather than a
+budget — produced `grpo_1500`. **Data diversity was the lever that no amount of in-domain tuning
+reached**, and the best arm in the project came out of it.
 
 **Never pay for a measurement without a free rehearsal.** The metered τ-bench run was preceded by a
 zero-cost dry run pointing the user simulator at the local server. It measured nothing and caught two
