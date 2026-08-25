@@ -2,10 +2,10 @@
 
 Written and committed **before** running τ-bench, on the same terms as `BFCL_PREREGISTRATION.md`:
 every claim is stated with the observation that would refute it, and all outcomes get reported in
-`WRITEUP.md` whether they support the existing conclusions or not.
+`FINDINGS.md` whether they support the existing conclusions or not.
 
 Prediction numbering continues from the BFCL file (P1–P17) so the two can be cross-referenced from
-`WRITEUP.md` without collision.
+`FINDINGS.md` without collision.
 
 ## What this measures, and what it does not
 

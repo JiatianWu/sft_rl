@@ -2,7 +2,7 @@
 
 Things that cost real time during the build. Each was found by running the producing code
 rather than trusting a doc, and each is pinned by a test or a comment in the repo so it
-cannot silently regress. Summarised in `WRITEUP.md` §5.
+cannot silently regress. Summarised in `FINDINGS.md` §5.
 
 ## TRL and the environment interface
 

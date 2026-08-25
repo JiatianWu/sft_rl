@@ -192,7 +192,7 @@ src/tooluse/
   eval/     run_eval.py  bfcl_adapter.py
 modal/      app.py                             # images + entrypoints
 results/                                       # raw per-task JSON, committed
-PLAN.md  WRITEUP.md  README.md
+PLAN.md  FINDINGS.md  README.md
 ```
 
 ---

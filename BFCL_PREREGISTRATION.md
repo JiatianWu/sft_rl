@@ -2,7 +2,7 @@
 
 Written and committed **before** running BFCL, so the predictions cannot be adjusted to fit
 the result. Every claim below is stated with the observation that would refute it, and all
-outcomes get reported in `WRITEUP.md` whether they support the existing conclusions or not.
+outcomes get reported in `FINDINGS.md` whether they support the existing conclusions or not.
 
 ## Why run it at all
 
@@ -65,7 +65,7 @@ single-turn AST, the full sweep buys nothing and should not be paid for.
 
 Per-category numbers for all four arms, the smoke-test result even if it ends the experiment,
 and an explicit statement of which predictions survived. A prediction that fails is the most
-informative outcome available here, since it would mean a conclusion already in `WRITEUP.md`
+informative outcome available here, since it would mean a conclusion already in `FINDINGS.md`
 needs revising.
 
 ---
@@ -266,7 +266,7 @@ project is its worst abstainer, and the two facts have the same cause.
 the abstention family together — the only untested configuration in which the best agent might also
 be a safe one.
 
-Added after the run. Full numbers and discussion in `WRITEUP.md` §3.6; reproduce with
+Added after the run. Full numbers and discussion in `FINDINGS.md` §3.6; reproduce with
 `python scripts/bfcl_table.py`.
 
 | prediction | verdict |

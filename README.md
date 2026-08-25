@@ -4,15 +4,18 @@ A minimal but complete pipeline that takes `Qwen3-0.6B` from base weights, throu
 instruction tuning on multi-turn tool-use trajectories, through online RL (GRPO) against
 an environment with verifiable rewards, and evaluates all three checkpoints identically.
 
+- **[WRITEUP.md](WRITEUP.md)** — **the 3-page submission**: the loop, the reward, the trade-offs,
+  the honest numbers and what a week would buy. Start here.
+- **[FINDINGS.md](FINDINGS.md)** — the same material at full length, with every number, every
+  transcript and every refuted prediction. Referenced by section from the writeup.
 - **[PLAN.md](PLAN.md)** — the plan, written before any code.
-- **[WRITEUP.md](WRITEUP.md)** — results, reward design, trade-offs, and what failed.
 - **[BFCL_PREREGISTRATION.md](BFCL_PREREGISTRATION.md)** — external-benchmark predictions,
   committed before the run, with the outcome appended.
 - **[TAU2_PREREGISTRATION.md](TAU2_PREREGISTRATION.md)** — the same discipline for τ-bench retail,
   including two predictions that were refuted and one pilot result that fresh data destroyed.
 - **[ENGINEERING_NOTES.md](ENGINEERING_NOTES.md)** — the things that cost time.
 
-The loop closed inside the 4-hour cap and could have been submitted there; [WRITEUP.md](WRITEUP.md)
+The loop closed inside the 4-hour cap and could have been submitted there; [FINDINGS.md](FINDINGS.md)
 §6 logs the nine rounds that followed and what each bought. The short version: **score moved 0.797 →
 0.880, confidence in the score moved much further and downward.** The four stages behind the
 headline cost well under a dollar — the other ~$31 went to learning that the result sits on a
@@ -46,7 +49,7 @@ A fourth finding came out of the tables rather than the models: `return_items` r
 of episodes unwinnable — and the test meant to prevent exactly that was circular. Both are
 fixed and pinned, and all six arms were then re-evaluated on the corrected metric.
 Re-evaluating twice also gives real error bars: **±0.01 headline, ±0.05 per family**.
-[WRITEUP.md](WRITEUP.md) §3.4.
+[FINDINGS.md](FINDINGS.md) §3.4.
 
 ### None of it transfers — BFCL
 
@@ -68,7 +71,7 @@ the base model had was trained out of it, and no in-domain metric could see it �
 
 **On-policy RL preserved what imitation destroyed** (0.795 vs base 0.807), despite training in
 the same single-call environment. The 0.797 is a real gain in the environment it was trained
-for, bought with general capability. [WRITEUP.md](WRITEUP.md) §3.6.
+for, bought with general capability. [FINDINGS.md](FINDINGS.md) §3.6.
 
 ### The diagnosis was actionable
 
@@ -83,7 +86,7 @@ lost capacity:
 
 82% of the damage recovered by changing nothing but which trajectories the model read, and it
 survives 30 steps of RL on top (`parallel` 0.705, AST pooled 0.755) — so the fix belongs before RL
-and stays there. [WRITEUP.md](WRITEUP.md) §3.7.
+and stays there. [FINDINGS.md](FINDINGS.md) §3.7.
 
 ### But it does not pay for itself
 
@@ -117,12 +120,12 @@ it exists because I questioned my own control rather than the models.
 
 The cost is on a different axis, and it is severe: **should-not-call falls to 0.225** against base's
 0.801, the most extreme point measured here. The best agent is the worst abstainer.
-[WRITEUP.md](WRITEUP.md) §3.11.
+[FINDINGS.md](FINDINGS.md) §3.11.
 
 One dial explains most of the project. Order the six arms by how well they abstain and the
 willingness-to-call column comes back in near-perfect reverse; every intervention moved it, none on
 purpose, and `sft_mixed + RL` ends up best-in-class at calling (0.875) and worst at staying silent
-(0.454). [WRITEUP.md](WRITEUP.md) §3.8.
+(0.454). [FINDINGS.md](FINDINGS.md) §3.8.
 
 The cause is not the one I first wrote down. The environment *does* pay full reward for refusing —
 but only via `transfer_to_human`, a state-changing call, so a text-only decline scores exactly 0.0
@@ -130,7 +133,7 @@ and successful refusals average 4.5 tool calls. A fifth of RL training teaches t
 request warrants four to five calls, which is the exact opposite of what BFCL irrelevance scores.
 That requirement exists because it patched an earlier hack where doing nothing scored a perfect
 1.0 — **a reward-hack fix installed the bias an external benchmark found later**, and nothing
-in-domain could see it. [WRITEUP.md](WRITEUP.md) §3.9.
+in-domain could see it. [FINDINGS.md](FINDINGS.md) §3.9.
 
 ### Acting on that diagnosis works, and mostly does not transfer
 
@@ -151,7 +154,7 @@ The gap is the real result. In-domain the fix is *saturated* — **400 of 400** 
 episodes make zero calls — yet it recovers only **25%** of the external gap to base. What the family
 teaches ("no email, no order id, no call") is narrower than what BFCL grades. Same lesson as §3.6
 from the other side: the environment keeps being too narrow to support the claim, and only the
-external benchmark shows it. [WRITEUP.md](WRITEUP.md) §3.10.
+external benchmark shows it. [FINDINGS.md](FINDINGS.md) §3.10.
 
 ### τ-bench retail inverts the ranking
 
@@ -185,7 +188,7 @@ against base vanishes once the user simulator it was trained to talk to exists.
 Three near-misses are documented rather than buried: a pilot result that fresh tasks reduced to
 p=1.00000; a denominator that conditions on surviving and inflates the worst arm from 1/40 to 1/6;
 and a user simulator that invents order ids in ~7.5% of conversations, implicated in two of the
-solves above. [WRITEUP.md](WRITEUP.md) §3.12.
+solves above. [FINDINGS.md](FINDINGS.md) §3.12.
 
 ## The loop
 
@@ -281,7 +284,7 @@ oracle and the reward cannot drift apart. `tests/test_env.py` asserts the oracle
 1.0 on every family; if it ever does not, the task is unsolvable and any RL number on it
 would be meaningless.
 
-See [WRITEUP.md](WRITEUP.md) for the shaping terms, how sparse signal is handled, and the
+See [FINDINGS.md](FINDINGS.md) for the shaping terms, how sparse signal is handled, and the
 reward-hacking hole the tests caught.
 
 ## Layout
