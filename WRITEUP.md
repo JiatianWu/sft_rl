@@ -164,7 +164,7 @@ inaction, with a user simulator that invented order ids in ~7.5% of conversation
 
 Written with an AI coding agent, which makes the interesting question what was *decided* rather than
 what was typed. The round-by-round ledger is [FINDINGS.md](FINDINGS.md) §6; the loop closed in round
-0, inside the cap, and every round after it was a choice about where to spend a $30 budget. Four of
+0, inside the cap, and every round after it was a choice about where to spend a $30 budget. Five of
 those choices did most of the work.
 
 **Buy external validation before polishing internal numbers.** BFCL was scheduled in the plan and
@@ -185,6 +185,13 @@ collapse (§4d), then failed to pay for itself as an RL prior, and finally — o
 made those two goals look exclusive was recognised as an artifact of the experiment rather than a
 budget — produced `grpo_1500`. **Data diversity was the lever that no amount of in-domain tuning
 reached**, and the best arm in the project came out of it.
+
+**Price the bottleneck before buying hardware.** Asking whether a more expensive GPU would finish the
+sweeps sooner is what forced the question of *what was actually slow* — and the answer was nothing on
+the GPU, which sat idle behind a 0.6B model while the real cap lived in the benchmark's own thread
+pool (§6). Raising it and fanning the arms across containers cut a sweep from over an hour to 24
+minutes at identical GPU-seconds, 74 minutes after the question was asked, for no additional spend.
+**Being willing to pay is what located the thing that did not need paying for.**
 
 **Never pay for a measurement without a free rehearsal.** The metered τ-bench run was preceded by a
 zero-cost dry run pointing the user simulator at the local server. It measured nothing and caught two
