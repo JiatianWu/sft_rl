@@ -1115,15 +1115,19 @@ def tau2(
             "--max-steps", str(max_steps),
             "--save-to", run_name,
         ]
+        # The key travels in the environment, never on argv. A Modal proxy token is
+        # `wk-<id>.ws-<secret>`, usable verbatim as an OpenAI bearer key — and when this subprocess
+        # fails, `CalledProcessError` prints the whole command line into the logs, which is how an
+        # earlier run leaked one. LiteLLM reads `OPENAI_API_KEY` for the `openai/` provider, and the
+        # agent is unaffected because it resolves through `hosted_vllm/`.
+        environment = dict(os.environ)
         if user_api_base:
-            # A Modal Endpoint proxy token is `wk-<id>.ws-<secret>`, which Modal documents as
-            # usable verbatim as an OpenAI-compatible bearer key.
+            environment["OPENAI_API_KEY"] = os.environ.get("TAU2_USER_API_KEY", "dummy")
             command += [
                 "--user-llm-args",
                 json.dumps(
                     {
                         "api_base": user_api_base,
-                        "api_key": os.environ.get("TAU2_USER_API_KEY", "dummy"),
                         # Without this the customer spends its whole token budget on reasoning and
                         # returns empty content, stalling every conversation. Verified by
                         # `tau2_user_probe`, which now rejects an empty reply outright.
@@ -1137,11 +1141,13 @@ def tau2(
             ]
         if task_ids:
             # Explicit ids rather than a count, so P22 runs on tasks the pilot never touched.
-            command += ["--task-ids", *task_ids.split(",")]
+            # Empties are stripped because a trailing separator (`seq -s,` produces one) reaches
+            # τ-bench as an id of "" and aborts the whole run with "Not all tasks were found".
+            command += ["--task-ids", *(t for t in task_ids.split(",") if t.strip())]
         elif num_tasks:
             command += ["--num-tasks", str(num_tasks)]
         print(f"\n{'=' * 70}\n[tau2] {tag}: {num_tasks or 'all'} tasks x {num_trials}\n{'=' * 70}", flush=True)
-        subprocess.run(command, cwd="/opt/tau2", check=True)
+        subprocess.run(command, cwd="/opt/tau2", check=True, env=environment)
     finally:
         server.terminate()
 
